@@ -1,0 +1,6 @@
+.venv/
+node_modules/
+frontend/dist/
+data/
+configs/local.yaml
+__pycache__/

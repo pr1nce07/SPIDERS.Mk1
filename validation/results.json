@@ -1,0 +1,915 @@
+{
+  "generated": "2026-09-27T11:18:30Z",
+  "data": "SIMULATED (synthetic MAVLink + Lua 5.4 scripts on simulated state)",
+  "runs_per_test": 3,
+  "master_seed": 2026,
+  "tests": [
+    {
+      "id": "TC-01",
+      "scenario": "NORMAL_FLIGHT",
+      "benign": true,
+      "attack": "Benign baseline: armed takeoff, GUIDED\u2192AUTO waypoint mission, RTL; no injected attack (sensor noise varies per run)",
+      "ground": [],
+      "lua": null,
+      "sources": "All vehicle MAVLink (HEARTBEAT, GPS_RAW_INT, GLOBAL_POSITION_INT, EKF_STATUS_REPORT, RAW_IMU/SCALED_IMU2, SYS_STATUS, RC_CHANNELS, RADIO_STATUS, MISSION_*, PARAM_*); all 8 Lua scripts",
+      "expected": "No ANOMALOUS/SUSPECTED alerts, no incident; Lua scripts stay CLEAR (only BRIDGE announcement)",
+      "criteria": "0 false-positive alerts and 0 incidents per run; 0 Lua SUSPECTED/CONFIRMED",
+      "summary": {
+        "runs": 3,
+        "ground_false_positive_alerts": 0,
+        "false_incidents": 0,
+        "lua_false_alarms": 0,
+        "pass": true
+      },
+      "runs": [
+        {
+          "seed": 202600,
+          "magnitude": 0.7,
+          "inject_at_s": 47.6,
+          "frames": 5532,
+          "lua_frames": 1,
+          "analysis_s": 0.88,
+          "throughput_msg_s": 6286,
+          "ground_detected": false,
+          "ground_latency_s": null,
+          "ground_first_alert": null,
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 0,
+          "incident": null,
+          "incidents_total": 0,
+          "lua_state": null,
+          "lua_latency_s": null,
+          "lua_classes": [],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        },
+        {
+          "seed": 202601,
+          "magnitude": 1.01,
+          "inject_at_s": 56.5,
+          "frames": 5978,
+          "lua_frames": 1,
+          "analysis_s": 0.964,
+          "throughput_msg_s": 6199,
+          "ground_detected": false,
+          "ground_latency_s": null,
+          "ground_first_alert": null,
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 0,
+          "incident": null,
+          "incidents_total": 0,
+          "lua_state": null,
+          "lua_latency_s": null,
+          "lua_classes": [],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        },
+        {
+          "seed": 202602,
+          "magnitude": 0.68,
+          "inject_at_s": 40.6,
+          "frames": 5182,
+          "lua_frames": 1,
+          "analysis_s": 0.834,
+          "throughput_msg_s": 6216,
+          "ground_detected": false,
+          "ground_latency_s": null,
+          "ground_first_alert": null,
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 0,
+          "incident": null,
+          "incidents_total": 0,
+          "lua_state": null,
+          "lua_latency_s": null,
+          "lua_classes": [],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        }
+      ]
+    },
+    {
+      "id": "TC-02",
+      "scenario": "GPS_IMU_MISMATCH",
+      "benign": false,
+      "attack": "GNSS spoofing: reported GPS velocity raised to 8+10.4\u00b7m m/s (m\u2208[0.6,1.4]) with position drag for 8 s while EKF/inertial velocity stays \u22488 m/s",
+      "ground": [
+        "GPS_INTEGRITY",
+        "RULE:GPS-CONSISTENCY-001"
+      ],
+      "lua": "GPS",
+      "domain": "GPS_INTEGRITY",
+      "sources": "GPS_RAW_INT (vel, fix, sats, HDOP), GLOBAL_POSITION_INT (EKF vx/vy), EKF_STATUS_REPORT (velocity variance); Lua gps_confirm.lua (gps:, ahrs:)",
+      "expected": "GPS_INTEGRITY residual/CUSUM alert, rule GPS-CONSISTENCY-001 fires, GPS integrity incident; gps_confirm.lua \u2192 PIDS GPS CONFIRMED + 'GPS CONFIRMED' STATUSTEXT",
+      "criteria": "Ground alert and incident within 5 s of injection; Lua GPS CONFIRMED; no single-sample alert",
+      "summary": {
+        "runs": 3,
+        "ground_detection_rate": "3/3",
+        "ground_latency_s": {
+          "median": 1.1,
+          "min": 1.0,
+          "max": 1.1
+        },
+        "incident_rate": "3/3",
+        "incident_states": {
+          "CONFIRMED": 3
+        },
+        "lua_confirmed": "3/3",
+        "lua_detected": "3/3",
+        "lua_latency_s": {
+          "median": 1.2,
+          "min": 1.1,
+          "max": 1.3
+        },
+        "lua_classes": [
+          "GPS CONFIRMED"
+        ],
+        "false_alerts_before_injection": 0,
+        "lua_script_errors": 0
+      },
+      "runs": [
+        {
+          "seed": 202600,
+          "magnitude": 1.08,
+          "inject_at_s": 48.9,
+          "frames": 5605,
+          "lua_frames": 9,
+          "analysis_s": 0.909,
+          "throughput_msg_s": 6164,
+          "ground_detected": true,
+          "ground_latency_s": 1.1,
+          "ground_first_alert": "GPS / EKF velocity consistency anomaly",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 11,
+          "incident": {
+            "state": "CONFIRMED",
+            "severity": "HIGH",
+            "confidence": 0.821,
+            "detectors": [
+              "PUSHPAK_FC",
+              "GPS_INTEGRITY",
+              "RULE:GPS-CONSISTENCY-001"
+            ],
+            "sources": [
+              "LUA",
+              "GROUND"
+            ],
+            "latency_s": 0.1
+          },
+          "incidents_total": 1,
+          "lua_state": "CONFIRMED",
+          "lua_latency_s": 1.3,
+          "lua_classes": [
+            "GPS CONFIRMED"
+          ],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "GPS"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        },
+        {
+          "seed": 202601,
+          "magnitude": 1.23,
+          "inject_at_s": 48.7,
+          "frames": 5597,
+          "lua_frames": 8,
+          "analysis_s": 0.907,
+          "throughput_msg_s": 6169,
+          "ground_detected": true,
+          "ground_latency_s": 1.1,
+          "ground_first_alert": "GPS / EKF velocity consistency anomaly",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 11,
+          "incident": {
+            "state": "CONFIRMED",
+            "severity": "HIGH",
+            "confidence": 0.822,
+            "detectors": [
+              "PUSHPAK_FC",
+              "GPS_INTEGRITY",
+              "RULE:GPS-CONSISTENCY-001"
+            ],
+            "sources": [
+              "LUA",
+              "GROUND"
+            ],
+            "latency_s": 0.1
+          },
+          "incidents_total": 1,
+          "lua_state": "CONFIRMED",
+          "lua_latency_s": 1.1,
+          "lua_classes": [
+            "GPS CONFIRMED"
+          ],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "GPS"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        },
+        {
+          "seed": 202602,
+          "magnitude": 1.18,
+          "inject_at_s": 54.2,
+          "frames": 5874,
+          "lua_frames": 8,
+          "analysis_s": 0.968,
+          "throughput_msg_s": 6067,
+          "ground_detected": true,
+          "ground_latency_s": 1.0,
+          "ground_first_alert": "GPS / EKF velocity consistency anomaly",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 11,
+          "incident": {
+            "state": "CONFIRMED",
+            "severity": "HIGH",
+            "confidence": 0.821,
+            "detectors": [
+              "PUSHPAK_FC",
+              "GPS_INTEGRITY",
+              "RULE:GPS-CONSISTENCY-001"
+            ],
+            "sources": [
+              "LUA",
+              "GROUND"
+            ],
+            "latency_s": 0.2
+          },
+          "incidents_total": 1,
+          "lua_state": "CONFIRMED",
+          "lua_latency_s": 1.2,
+          "lua_classes": [
+            "GPS CONFIRMED"
+          ],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "GPS"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        }
+      ]
+    },
+    {
+      "id": "TC-03",
+      "scenario": "COMMAND_BURST",
+      "benign": false,
+      "attack": "Command injection from unknown SYSID 42: burst of COMMAND_LONG for 3\u00b7m s (DO_SET_MODE accepted, DISARM-in-flight and REBOOT refused)",
+      "ground": [
+        "COMMAND",
+        "SOURCE_IDENTITY",
+        "RULE:CMD-BURST-001"
+      ],
+      "lua": "COMMAND",
+      "domain": "MAVLINK_SECURITY",
+      "sources": "COMMAND_LONG, COMMAND_ACK, HEARTBEAT (SYSID/COMPID provenance); Lua command_confirm.lua (mode, ModeReason, GCS last-seen)",
+      "expected": "Untrusted-source + context-inconsistent command alerts, CMD-BURST-001 rule, correlated MAVLink-security incident; Lua sees GCS-commanded mode changes in flight",
+      "criteria": "Incident CONFIRMED (\u22652 independent detectors) within 5 s; Lua \u2265 SUSPECTED (Lua cannot see packet source on this firmware)",
+      "summary": {
+        "runs": 3,
+        "ground_detection_rate": "3/3",
+        "ground_latency_s": {
+          "median": 2.16,
+          "min": 2.14,
+          "max": 2.2
+        },
+        "incident_rate": "3/3",
+        "incident_states": {
+          "CONFIRMED": 3
+        },
+        "lua_confirmed": "0/3",
+        "lua_detected": "3/3",
+        "lua_latency_s": {
+          "median": 3.2,
+          "min": 3.2,
+          "max": 3.4
+        },
+        "lua_classes": [],
+        "false_alerts_before_injection": 0,
+        "lua_script_errors": 0
+      },
+      "runs": [
+        {
+          "seed": 202600,
+          "magnitude": 1.2,
+          "inject_at_s": 49.7,
+          "frames": 5730,
+          "lua_frames": 3,
+          "analysis_s": 0.938,
+          "throughput_msg_s": 6107,
+          "ground_detected": true,
+          "ground_latency_s": 2.14,
+          "ground_first_alert": "Untrusted source sending control-plane messages",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 7,
+          "incident": {
+            "state": "CONFIRMED",
+            "severity": "HIGH",
+            "confidence": 0.99,
+            "detectors": [
+              "SOURCE_IDENTITY",
+              "COMMAND",
+              "RULE:CMD-BURST-001",
+              "PUSHPAK_FC",
+              "FLIGHT_MODE"
+            ],
+            "sources": [
+              "GROUND",
+              "LUA"
+            ],
+            "latency_s": 2.38
+          },
+          "incidents_total": 1,
+          "lua_state": "SUSPECTED",
+          "lua_latency_s": 3.2,
+          "lua_classes": [],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "COMMAND"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        },
+        {
+          "seed": 202601,
+          "magnitude": 0.79,
+          "inject_at_s": 50.4,
+          "frames": 5754,
+          "lua_frames": 3,
+          "analysis_s": 0.945,
+          "throughput_msg_s": 6091,
+          "ground_detected": true,
+          "ground_latency_s": 2.16,
+          "ground_first_alert": "Untrusted source sending control-plane messages",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 5,
+          "incident": {
+            "state": "CONFIRMED",
+            "severity": "HIGH",
+            "confidence": 0.935,
+            "detectors": [
+              "SOURCE_IDENTITY",
+              "COMMAND",
+              "RULE:CMD-BURST-001",
+              "PUSHPAK_FC"
+            ],
+            "sources": [
+              "GROUND",
+              "LUA"
+            ],
+            "latency_s": 2.4
+          },
+          "incidents_total": 1,
+          "lua_state": "SUSPECTED",
+          "lua_latency_s": 3.4,
+          "lua_classes": [],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "COMMAND"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        },
+        {
+          "seed": 202602,
+          "magnitude": 0.69,
+          "inject_at_s": 55.4,
+          "frames": 6000,
+          "lua_frames": 3,
+          "analysis_s": 0.988,
+          "throughput_msg_s": 6075,
+          "ground_detected": true,
+          "ground_latency_s": 2.2,
+          "ground_first_alert": "Untrusted source sending control-plane messages",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 5,
+          "incident": {
+            "state": "CONFIRMED",
+            "severity": "HIGH",
+            "confidence": 0.935,
+            "detectors": [
+              "SOURCE_IDENTITY",
+              "COMMAND",
+              "RULE:CMD-BURST-001",
+              "PUSHPAK_FC"
+            ],
+            "sources": [
+              "GROUND",
+              "LUA"
+            ],
+            "latency_s": 2.44
+          },
+          "incidents_total": 1,
+          "lua_state": "SUSPECTED",
+          "lua_latency_s": 3.2,
+          "lua_classes": [],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "COMMAND"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        }
+      ]
+    },
+    {
+      "id": "TC-04",
+      "scenario": "PARAMETER_CHANGE",
+      "benign": false,
+      "attack": "Parameter tampering in flight from SYSID 42: 3\u20136 PARAM_SET writes (FENCE_ENABLE=0, ARMING_CHECK=0, FS_THR_ENABLE=0, RTL_ALT, WPNAV_SPEED, ANGLE_MAX)",
+      "ground": [
+        "PARAMETER",
+        "SOURCE_IDENTITY"
+      ],
+      "lua": "PARAMETER",
+      "domain": "MAVLINK_SECURITY",
+      "sources": "PARAM_SET, PARAM_VALUE (old/new/original values), HEARTBEAT; Lua parameter_confirm.lua (param:get watch-list)",
+      "expected": "Parameter anomaly alerts (sensitive while armed, untrusted writer, large deviation, burst), incident; Lua PARAMETER CONFIRMED",
+      "criteria": "Ground alert within 2 s of first write; incident created; Lua PARAMETER CONFIRMED",
+      "summary": {
+        "runs": 3,
+        "ground_detection_rate": "3/3",
+        "ground_latency_s": {
+          "median": 2.0,
+          "min": 2.0,
+          "max": 2.0
+        },
+        "incident_rate": "3/3",
+        "incident_states": {
+          "CORRELATED": 3
+        },
+        "lua_confirmed": "3/3",
+        "lua_detected": "3/3",
+        "lua_latency_s": {
+          "median": 3.7,
+          "min": 3.6,
+          "max": 4.0
+        },
+        "lua_classes": [
+          "AIRBORNE_PARAMETER_SOURCE_ANOMALY"
+        ],
+        "false_alerts_before_injection": 0,
+        "lua_script_errors": 0
+      },
+      "runs": [
+        {
+          "seed": 202600,
+          "magnitude": 0.96,
+          "inject_at_s": 55.4,
+          "frames": 6003,
+          "lua_frames": 7,
+          "analysis_s": 0.997,
+          "throughput_msg_s": 6024,
+          "ground_detected": true,
+          "ground_latency_s": 2.0,
+          "ground_first_alert": "Untrusted source sending control-plane messages",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 13,
+          "incident": {
+            "state": "CORRELATED",
+            "severity": "HIGH",
+            "confidence": 0.733,
+            "detectors": [
+              "SOURCE_IDENTITY",
+              "PARAMETER",
+              "PUSHPAK_FC"
+            ],
+            "sources": [
+              "GROUND",
+              "LUA"
+            ],
+            "latency_s": 2.0
+          },
+          "incidents_total": 1,
+          "lua_state": "CONFIRMED",
+          "lua_latency_s": 3.6,
+          "lua_classes": [
+            "AIRBORNE_PARAMETER_SOURCE_ANOMALY"
+          ],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "PARAMETER"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        },
+        {
+          "seed": 202601,
+          "magnitude": 1.15,
+          "inject_at_s": 52.0,
+          "frames": 5827,
+          "lua_frames": 7,
+          "analysis_s": 0.96,
+          "throughput_msg_s": 6072,
+          "ground_detected": true,
+          "ground_latency_s": 2.0,
+          "ground_first_alert": "Untrusted source sending control-plane messages",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 13,
+          "incident": {
+            "state": "CORRELATED",
+            "severity": "HIGH",
+            "confidence": 0.733,
+            "detectors": [
+              "SOURCE_IDENTITY",
+              "PARAMETER",
+              "PUSHPAK_FC"
+            ],
+            "sources": [
+              "GROUND",
+              "LUA"
+            ],
+            "latency_s": 2.0
+          },
+          "incidents_total": 1,
+          "lua_state": "CONFIRMED",
+          "lua_latency_s": 4.0,
+          "lua_classes": [
+            "AIRBORNE_PARAMETER_SOURCE_ANOMALY"
+          ],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "PARAMETER"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        },
+        {
+          "seed": 202602,
+          "magnitude": 0.77,
+          "inject_at_s": 41.3,
+          "frames": 5300,
+          "lua_frames": 7,
+          "analysis_s": 0.869,
+          "throughput_msg_s": 6099,
+          "ground_detected": true,
+          "ground_latency_s": 2.0,
+          "ground_first_alert": "Untrusted source sending control-plane messages",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 11,
+          "incident": {
+            "state": "CORRELATED",
+            "severity": "HIGH",
+            "confidence": 0.733,
+            "detectors": [
+              "SOURCE_IDENTITY",
+              "PARAMETER",
+              "PUSHPAK_FC"
+            ],
+            "sources": [
+              "GROUND",
+              "LUA"
+            ],
+            "latency_s": 2.0
+          },
+          "incidents_total": 1,
+          "lua_state": "CONFIRMED",
+          "lua_latency_s": 3.7,
+          "lua_classes": [
+            "AIRBORNE_PARAMETER_SOURCE_ANOMALY"
+          ],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "PARAMETER"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        }
+      ]
+    },
+    {
+      "id": "TC-05",
+      "scenario": "RC_DEGRADATION",
+      "benign": false,
+      "attack": "RC/telemetry jamming: RSSI falls at 7\u00b7m units/s, radio rx-errors and noise rise, RC receiver lost 3\u00d7 for 4 s (intermittent)",
+      "ground": [
+        "RC_LINK"
+      ],
+      "lua": "RC_LINK",
+      "domain": "LINK",
+      "sources": "RC_CHANNELS (rssi), RADIO_STATUS (rssi, noise, rxerrors), SYS_STATUS (RC receiver health bit); Lua jamming_confirm.lua (rc:has_valid_input)",
+      "expected": "Gradual-degradation, low-quality, complete-loss and intermittent-loss RC_LINK alerts; Lua RC_LINK CONFIRMED (JAMMING_OR_LOW_LINK_DEGRADATION)",
+      "criteria": "Ground RC_LINK alert before first receiver loss; Lua RC_LINK CONFIRMED by the 3rd loss",
+      "summary": {
+        "runs": 3,
+        "ground_detection_rate": "3/3",
+        "ground_latency_s": {
+          "median": 9.5,
+          "min": 9.3,
+          "max": 10.1
+        },
+        "incident_rate": "3/3",
+        "incident_states": {
+          "CORRELATED": 3
+        },
+        "lua_confirmed": "3/3",
+        "lua_detected": "3/3",
+        "lua_latency_s": {
+          "median": 48.7,
+          "min": 48.7,
+          "max": 48.7
+        },
+        "lua_classes": [
+          "PERSISTENT_RF_DEGRADATION_CANDIDATE"
+        ],
+        "false_alerts_before_injection": 0,
+        "lua_script_errors": 0
+      },
+      "runs": [
+        {
+          "seed": 202600,
+          "magnitude": 1.38,
+          "inject_at_s": 58.2,
+          "frames": 6079,
+          "lua_frames": 14,
+          "analysis_s": 1.08,
+          "throughput_msg_s": 5627,
+          "ground_detected": true,
+          "ground_latency_s": 9.3,
+          "ground_first_alert": "RC link: gradual degradation",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 12,
+          "incident": {
+            "state": "CORRELATED",
+            "severity": "HIGH",
+            "confidence": 0.512,
+            "detectors": [
+              "RC_LINK",
+              "PUSHPAK_FC"
+            ],
+            "sources": [
+              "GROUND",
+              "LUA"
+            ],
+            "latency_s": 26.5
+          },
+          "incidents_total": 1,
+          "lua_state": "CONFIRMED",
+          "lua_latency_s": 48.7,
+          "lua_classes": [
+            "PERSISTENT_RF_DEGRADATION_CANDIDATE"
+          ],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "RC_LINK"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        },
+        {
+          "seed": 202601,
+          "magnitude": 1.24,
+          "inject_at_s": 60.0,
+          "frames": 6160,
+          "lua_frames": 14,
+          "analysis_s": 1.031,
+          "throughput_msg_s": 5977,
+          "ground_detected": true,
+          "ground_latency_s": 9.5,
+          "ground_first_alert": "RC link: gradual degradation",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 12,
+          "incident": {
+            "state": "CORRELATED",
+            "severity": "HIGH",
+            "confidence": 0.512,
+            "detectors": [
+              "RC_LINK",
+              "PUSHPAK_FC"
+            ],
+            "sources": [
+              "GROUND",
+              "LUA"
+            ],
+            "latency_s": 26.5
+          },
+          "incidents_total": 1,
+          "lua_state": "CONFIRMED",
+          "lua_latency_s": 48.7,
+          "lua_classes": [
+            "PERSISTENT_RF_DEGRADATION_CANDIDATE"
+          ],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "RC_LINK"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        },
+        {
+          "seed": 202602,
+          "magnitude": 1.01,
+          "inject_at_s": 36.9,
+          "frames": 5009,
+          "lua_frames": 14,
+          "analysis_s": 0.815,
+          "throughput_msg_s": 6148,
+          "ground_detected": true,
+          "ground_latency_s": 10.1,
+          "ground_first_alert": "Telemetry radio errors / noise rising",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 12,
+          "incident": {
+            "state": "CORRELATED",
+            "severity": "HIGH",
+            "confidence": 0.512,
+            "detectors": [
+              "RC_LINK",
+              "PUSHPAK_FC"
+            ],
+            "sources": [
+              "GROUND",
+              "LUA"
+            ],
+            "latency_s": 26.5
+          },
+          "incidents_total": 1,
+          "lua_state": "CONFIRMED",
+          "lua_latency_s": 48.7,
+          "lua_classes": [
+            "PERSISTENT_RF_DEGRADATION_CANDIDATE"
+          ],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "RC_LINK"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        }
+      ]
+    },
+    {
+      "id": "TC-06",
+      "scenario": "MISSION_CHANGE",
+      "benign": false,
+      "attack": "Mission tampering in flight: SYSID 42 uploads a 3-item mission (waypoints scaled by m), vehicle index restarts",
+      "ground": [
+        "MISSION",
+        "SOURCE_IDENTITY"
+      ],
+      "lua": "MISSION",
+      "domain": "MISSION",
+      "sources": "MISSION_COUNT, MISSION_ITEM_INT (SHA-256 fingerprint), MISSION_ACK, MISSION_CURRENT; Lua mission_confirm.lua (mission:get_item fingerprint)",
+      "expected": "Mission modification during flight (fingerprint change + untrusted uploader) + index discontinuity, incident; Lua MISSION CONFIRMED (IN_FLIGHT_MISSION_INTEGRITY_ANOMALY)",
+      "criteria": "Ground alert within 2 s of upload; incident created; Lua MISSION CONFIRMED",
+      "summary": {
+        "runs": 3,
+        "ground_detection_rate": "3/3",
+        "ground_latency_s": {
+          "median": 2.0,
+          "min": 2.0,
+          "max": 2.0
+        },
+        "incident_rate": "3/3",
+        "incident_states": {
+          "CORRELATED": 3
+        },
+        "lua_confirmed": "3/3",
+        "lua_detected": "3/3",
+        "lua_latency_s": {
+          "median": 4.4,
+          "min": 4.1,
+          "max": 4.6
+        },
+        "lua_classes": [
+          "IN_FLIGHT_MISSION_INTEGRITY_ANOMALY"
+        ],
+        "false_alerts_before_injection": 0,
+        "lua_script_errors": 0
+      },
+      "runs": [
+        {
+          "seed": 202600,
+          "magnitude": 0.87,
+          "inject_at_s": 48.9,
+          "frames": 5682,
+          "lua_frames": 13,
+          "analysis_s": 0.928,
+          "throughput_msg_s": 6120,
+          "ground_detected": true,
+          "ground_latency_s": 2.0,
+          "ground_first_alert": "Untrusted source sending control-plane messages",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 4,
+          "incident": {
+            "state": "CORRELATED",
+            "severity": "HIGH",
+            "confidence": 0.653,
+            "detectors": [
+              "SOURCE_IDENTITY",
+              "MISSION",
+              "PUSHPAK_FC"
+            ],
+            "sources": [
+              "GROUND",
+              "LUA"
+            ],
+            "latency_s": 2.0
+          },
+          "incidents_total": 1,
+          "lua_state": "CONFIRMED",
+          "lua_latency_s": 4.1,
+          "lua_classes": [
+            "IN_FLIGHT_MISSION_INTEGRITY_ANOMALY"
+          ],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "MISSION"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        },
+        {
+          "seed": 202601,
+          "magnitude": 0.83,
+          "inject_at_s": 46.4,
+          "frames": 5559,
+          "lua_frames": 13,
+          "analysis_s": 0.912,
+          "throughput_msg_s": 6094,
+          "ground_detected": true,
+          "ground_latency_s": 2.0,
+          "ground_first_alert": "Untrusted source sending control-plane messages",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 4,
+          "incident": {
+            "state": "CORRELATED",
+            "severity": "HIGH",
+            "confidence": 0.653,
+            "detectors": [
+              "SOURCE_IDENTITY",
+              "MISSION",
+              "PUSHPAK_FC"
+            ],
+            "sources": [
+              "GROUND",
+              "LUA"
+            ],
+            "latency_s": 2.0
+          },
+          "incidents_total": 1,
+          "lua_state": "CONFIRMED",
+          "lua_latency_s": 4.6,
+          "lua_classes": [
+            "IN_FLIGHT_MISSION_INTEGRITY_ANOMALY"
+          ],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "MISSION"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        },
+        {
+          "seed": 202602,
+          "magnitude": 1.3,
+          "inject_at_s": 52.6,
+          "frames": 5869,
+          "lua_frames": 13,
+          "analysis_s": 0.964,
+          "throughput_msg_s": 6090,
+          "ground_detected": true,
+          "ground_latency_s": 2.0,
+          "ground_first_alert": "Untrusted source sending control-plane messages",
+          "ground_false_alerts_pre_injection": 0,
+          "ground_alerts_total": 4,
+          "incident": {
+            "state": "CORRELATED",
+            "severity": "HIGH",
+            "confidence": 0.653,
+            "detectors": [
+              "SOURCE_IDENTITY",
+              "MISSION",
+              "PUSHPAK_FC"
+            ],
+            "sources": [
+              "GROUND",
+              "LUA"
+            ],
+            "latency_s": 2.0
+          },
+          "incidents_total": 1,
+          "lua_state": "CONFIRMED",
+          "lua_latency_s": 4.4,
+          "lua_classes": [
+            "IN_FLIGHT_MISSION_INTEGRITY_ANOMALY"
+          ],
+          "lua_false_alarms": 0,
+          "lua_seen_by_gcs": [
+            "MISSION"
+          ],
+          "lua_script_errors": {},
+          "detector_errors": 0
+        }
+      ]
+    }
+  ]
+}

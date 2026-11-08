@@ -1,0 +1,162 @@
+# SPIDERS.Mk1 — default configuration
+# Every detector threshold lives here (or in rule definitions), never in React code.
+
+mavlink:
+  connection: "udp:127.0.0.1:14550"
+  baud: 115200
+  auto_reconnect: true
+  reconnect_min_s: 1.0
+  reconnect_max_s: 15.0
+  dialect: "ardupilotmega"      # verified: firmware build uses stock ardupilotmega (no PUSHPAK custom messages)
+  dialect_xml: null             # optional path to a verified custom dialect XML
+  vehicle_sysid: null           # null = learn from first autopilot HEARTBEAT
+  trusted_gcs_sysids: [255]     # expected ground-station system IDs
+  signing_key_file: null        # path to 32-byte key file; never displayed/exported
+  signing_expected: false
+  heartbeat_stale_s: 3.0
+  heartbeat_loss_s: 6.0
+
+recording:
+  enabled: true
+  rolling_minutes: 5
+  max_rolling_items: 200000
+  capture_dir: "data/captures"
+
+forensics:
+  pre_event_seconds: 30
+  post_event_seconds: 60
+  hash_algorithm: sha256
+  case_dir: "data/cases"
+  auto_snapshot_severities: ["HIGH", "CRITICAL"]
+  auto_snapshot_on_confirmed: true
+  max_case_mb: 512
+
+ids:
+  enabled: true
+  suspected_threshold: 0.45
+  confirmed_threshold: 0.75
+  correlation_window_seconds: 10
+  min_correlated_detectors: 2
+  tick_hz: 1.0
+  detectors:
+    HEARTBEAT: {enabled: true, severity: MEDIUM}
+    MAVLINK_SEQUENCE:
+      enabled: true
+      severity: MEDIUM
+      loss_ratio_threshold: 0.10
+      min_window_packets: 50
+      window_s: 10
+      duplicate_window_s: 2.0
+      reorder_tolerance: 16
+    SOURCE_IDENTITY: {enabled: true, severity: MEDIUM, baseline_seconds: 20}
+    MAVLINK_RATE:
+      enabled: true
+      severity: LOW
+      burst_factor: 4.0
+      min_baseline_hz: 0.5
+      baseline_seconds: 30
+      cusum_k: 0.5
+      cusum_h: 8.0
+    MAVLINK_SIGNING: {enabled: true, severity: HIGH}
+    COMMAND:
+      enabled: true
+      severity: HIGH
+      burst_count: 6
+      burst_window_s: 5
+      repeat_count: 3
+      ack_timeout_s: 3
+    PARAMETER:
+      enabled: true
+      severity: HIGH
+      burst_count: 5
+      burst_window_s: 10
+      large_deviation_ratio: 0.5
+      sensitive_prefixes: ["ARMING_", "FENCE_", "FS_", "BATT_FS", "GPS_TYPE", "SYSID_", "SERIAL", "BRD_SAFETY", "EK3_SRC", "SCR_", "MAV_", "RC_OPTIONS", "DISARM_DELAY", "RTL_", "WPNAV_", "ANGLE_MAX", "LOG_"]
+    RC_LINK:
+      enabled: true
+      severity: MEDIUM
+      rssi_low: 60
+      ewma_alpha: 0.2
+      degrade_slope_per_s: -1.5
+      loss_s: 2.0
+    IMU_CONSISTENCY:
+      enabled: true
+      severity: MEDIUM
+      accel_residual_mg: 350
+      gyro_residual_mrads: 150
+      baro_gps_alt_residual_m: 25
+      persistence_s: 2.0
+    MISSION: {enabled: true, severity: HIGH, index_jump: 3}
+    OFFBOARD:
+      enabled: true
+      severity: MEDIUM
+      stale_s: 1.5
+      burst_hz: 60
+      divergence_m: 25
+      divergence_s: 5
+    BATTERY:
+      enabled: true
+      severity: MEDIUM
+      voltage_step_v: 1.2
+      current_step_a: 15
+      remaining_jump_pct: 15
+    FLIGHT_MODE: {enabled: true, severity: LOW, flap_count: 4, flap_window_s: 10}
+    SENSOR_HEALTH: {enabled: true, severity: MEDIUM, persistence_s: 2.0}
+    GPS_INTEGRITY:
+      enabled: true
+      severity: HIGH
+      position_residual_m: 15
+      velocity_residual_ms: 3.0
+      jump_speed_factor: 3.0
+      jump_min_m: 30
+      robust_z: 4.0
+      window: 30
+      ewma_alpha: 0.15
+      cusum_k: 1.0
+      cusum_h: 12.0
+      ekf_variance_threshold: 0.8
+      min_sats: 6
+      max_hdop: 2.5
+      persistence_s: 3.0
+    PUSHPAK_FC: {enabled: true, severity: HIGH}
+    ML_BASELINE:
+      enabled: true
+      severity: LOW
+      training_seconds: 60
+      contamination: 0.02
+      score_threshold: -0.15
+      min_samples: 40
+
+gui:
+  update_hz: 10
+
+database:
+  url: "sqlite:///data/database/pushpak_gcs.db"
+  batch_interval_s: 0.5
+  max_queue: 50000
+  emergency_queue: 20000
+  retention_days: 30
+
+limits:
+  max_ingest_queue: 20000
+  max_ws_queue: 500
+  max_upload_mb: 1024
+  disk_min_free_mb: 500
+  max_memory_mb: 2048
+
+security:
+  read_only: true
+  bind_host: "127.0.0.1"
+  port: 8600
+  remote_mode: false
+  tls_cert: null
+  tls_key: null
+  # token_hash is sha256(hex) of a bearer token; tokens themselves are never stored.
+  tokens: []
+  # - {token_hash: "...", role: engineer, user: alice}
+
+simulation:
+  home_lat: 12.9716
+  home_lon: 77.5946
+  home_alt_m: 920
+  rate_scale: 1.0

@@ -1,0 +1,365 @@
+{
+  "generated_at": "2026-09-27T11:15:13.008270+00:00",
+  "inputs": {
+    "build_zip_sha256": "ea1e35ce69088f1233a91679ac42538f11b492f54b07b8baf576ad21fee6e74d",
+    "romfs_zip_sha256": "854a607f6077139c0e7d2dfd19594f6a04ef801e0370d9fe36acd57a295c3ede",
+    "apj_present": true
+  },
+  "vehicle": {
+    "board": "Pixhawk6C",
+    "firmware": "ArduCopter V4.7.1 (dbe79216)",
+    "git_commit": "dbe79216"
+  },
+  "mavlink": {
+    "version": "2",
+    "dialect": "ardupilotmega",
+    "custom_dialect": false
+  },
+  "pushpak": {
+    "ap_ids_native": true,
+    "lua_scripts_present": true,
+    "lua_bridge_script_present": true,
+    "lua_bridge_functional": false,
+    "fc_telemetry_to_gcs": false,
+    "native_detectors_active": [
+      "GPSDetector",
+      "IMUDetector",
+      "MissionDetector"
+    ],
+    "structured_custom_message": false,
+    "statustext_formats_from_source": [
+      "PIDS|1|FC|<DET>|<state>|<conf>|<evidence>|<metric>|<instance>",
+      "PUSHPAK IDS: <CLASS> conf=<c> evidence=0x<hex>",
+      "PUSHPAK IDS: GPS CONFIRMED conf=.. pos=..m vel=..m/s robust=.. cusum=.."
+    ],
+    "jamming_detector": "LUA_CLASS_ONLY (jamming_confirm.lua classifies RC_LINK evidence; no JAMMING PIDS detector)"
+  },
+  "logging": {
+    "dataflash": true,
+    "tlog": true,
+    "dataflash_ids_messages": [],
+    "remote_log_streaming": "UNVERIFIED (depends on LOG_BACKEND_TYPE at runtime)"
+  },
+  "findings": [
+    {
+      "key": "firmware.version",
+      "value": "ArduCopter V4.7.1 (dbe79216)",
+      "evidence": "string literal in build/Pixhawk6C/bin/arducopter.bin"
+    },
+    {
+      "key": "firmware.git_commit",
+      "value": "dbe79216",
+      "evidence": "build/Pixhawk6C/ap_version.h GIT_VERSION"
+    },
+    {
+      "key": "firmware.git_commit_extended",
+      "value": "dbe792162d06cab6",
+      "evidence": "ap_version.h GIT_VERSION_EXTENDED"
+    },
+    {
+      "key": "firmware.chibios_commit",
+      "value": "d103983f",
+      "evidence": "ap_version.h CHIBIOS_GIT_VERSION"
+    },
+    {
+      "key": "board.target",
+      "value": "Pixhawk6C",
+      "evidence": "build/c4che/Pixhawk6C_cache.py BOARD"
+    },
+    {
+      "key": "board.apj_board_id",
+      "value": "56",
+      "evidence": "Pixhawk6C_cache.py APJ_BOARD_ID"
+    },
+    {
+      "key": "board.flash_kb",
+      "value": 2048,
+      "evidence": "Pixhawk6C_cache.py BOARD_FLASH_SIZE"
+    },
+    {
+      "key": "ap_ids.compiled_objects",
+      "value": [
+        "AP_IDS.cpp.0.o",
+        "AP_IDSGCS.cpp.0.o",
+        "CommandDetector.cpp.0.o",
+        "GPSDetector.cpp.0.o",
+        "IMUDetector.cpp.0.o",
+        "MAVLinkDetector.cpp.0.o",
+        "MissionDetector.cpp.0.o",
+        "OffboardDetector.cpp.0.o",
+        "ParameterDetector.cpp.0.o",
+        "RCDetector.cpp.0.o"
+      ],
+      "evidence": "object files under build/Pixhawk6C/libraries/AP_IDS/"
+    },
+    {
+      "key": "ap_ids.lua_binding_methods",
+      "value": [
+        "event_sequence",
+        "report_confirmed"
+      ],
+      "evidence": "ELF symbols _ZL..AP_IDS_<method>P9lua_State (generated scripting bindings)"
+    },
+    {
+      "key": "ap_ids.update_invokes_detectors",
+      "value": [
+        "GPSDetector",
+        "IMUDetector",
+        "MissionDetector"
+      ],
+      "evidence": "objdump of AP_IDS::update(): direct calls"
+    },
+    {
+      "key": "ap_ids.linked_detector_classes",
+      "value": [
+        "AP_Mission_ChangeDetector",
+        "GPSDetector",
+        "IMUDetector",
+        "MAVLinkDetector",
+        "MissionDetector"
+      ],
+      "evidence": "objdump: detector methods present in final ELF"
+    },
+    {
+      "key": "ap_ids.gcs_report_is_stub",
+      "value": true,
+      "evidence": "objdump: AP_IDSGCS::report_confirmed = `movs r0,#0; bx lr`"
+    },
+    {
+      "key": "mavlink.custom_messages",
+      "value": [],
+      "evidence": "scanned 73 generated ardupilotmega message headers"
+    },
+    {
+      "key": "dataflash.ids_log_messages",
+      "value": [],
+      "evidence": "ELF string table (LogStructure names). Note: 'PIDS' is ArduPilot's PID-steering log, unrelated"
+    },
+    {
+      "key": "romfs.embedded_scripts",
+      "value": {
+        "scripts/command_confirm.lua": 2348,
+        "scripts/gps_confirm.lua": 4133,
+        "scripts/ids_common.lua": 1504,
+        "scripts/ids_gcs_bridge.lua": 3871,
+        "scripts/imu_confirm.lua": 2072,
+        "scripts/jamming_confirm.lua": 2066,
+        "scripts/mavlink_confirm.lua": 2345,
+        "scripts/mission_confirm.lua": 1903,
+        "scripts/offboard_confirm.lua": 2270,
+        "scripts/parameter_confirm.lua": 2278
+      },
+      "evidence": "build/Pixhawk6C/ap_romfs_embedded.h"
+    },
+    {
+      "key": "lua.scripts",
+      "value": {
+        "command_confirm.lua": {
+          "size": 2348,
+          "sha256": "d534c9d4df8f8da837eeb4c28363fb44675300bcd7eaab5fc1c536d66a3a4d5f",
+          "embedded_size_match": true
+        },
+        "gps_confirm.lua": {
+          "size": 4133,
+          "sha256": "60c5b1f0f1913b43f6ea4f28be95303be0c78536a9cf3d0578fd58a4334e5bae",
+          "embedded_size_match": true
+        },
+        "ids_common.lua": {
+          "size": 1504,
+          "sha256": "398167ea157b42856e7cc8c80d308b3e1d170597f67a5c875ace10169c142910",
+          "embedded_size_match": true
+        },
+        "ids_gcs_bridge.lua": {
+          "size": 3871,
+          "sha256": "8ccdfd1631994a967717c1b27519fd806fb66bdb5632bf3f43416866e6be420a",
+          "embedded_size_match": true
+        },
+        "imu_confirm.lua": {
+          "size": 2072,
+          "sha256": "29ed9610f864b46e5c06338b7105e7aed1269d389a719da5fa5c73a3377ea4b9",
+          "embedded_size_match": true
+        },
+        "jamming_confirm.lua": {
+          "size": 2066,
+          "sha256": "656e5936d133d270f2f37d84c9aa458e44b7716649452916ba7cd54c79ac6fd2",
+          "embedded_size_match": true
+        },
+        "mavlink_confirm.lua": {
+          "size": 2345,
+          "sha256": "e352ca0a2ea4e36e63f154f79ed9292516e4afd7ca72af9543ad9cdd89d0aaaa",
+          "embedded_size_match": true
+        },
+        "mission_confirm.lua": {
+          "size": 1903,
+          "sha256": "f74b0195bf013194f4c1a56bdd57687cc111787c919dc5adae1387d20f2b72e6",
+          "embedded_size_match": true
+        },
+        "offboard_confirm.lua": {
+          "size": 2270,
+          "sha256": "b2bccb7b3e6e963dc152b0d4f1130b1516fa55ff59657cf14f339c9c89d488b2",
+          "embedded_size_match": true
+        },
+        "parameter_confirm.lua": {
+          "size": 2278,
+          "sha256": "fbba8d146ea2dc1f496bf6ebf62c6af9929ec16607c08c2bab9048e34d7dc9b8",
+          "embedded_size_match": true
+        }
+      },
+      "evidence": "ROMFS_custom.zip (sizes compared against ap_romfs_embedded.h)"
+    },
+    {
+      "key": "lua.ids_methods_called",
+      "value": [
+        "command_confidence",
+        "command_evidence",
+        "command_state",
+        "gps_confidence",
+        "gps_evidence",
+        "gps_state",
+        "imu_confidence",
+        "imu_evidence",
+        "imu_state",
+        "mavlink_confidence",
+        "mavlink_evidence",
+        "mavlink_state",
+        "mission_confidence",
+        "mission_evidence",
+        "mission_state",
+        "offboard_confidence",
+        "offboard_evidence",
+        "offboard_state",
+        "parameter_confidence",
+        "parameter_evidence",
+        "parameter_state",
+        "rc_confidence",
+        "rc_evidence",
+        "rc_state"
+      ],
+      "evidence": "regex ids:<method>( over the Lua sources"
+    },
+    {
+      "key": "lua.ids_methods_missing_from_binding",
+      "value": {
+        "command_confidence": [
+          "command_confirm.lua",
+          "ids_gcs_bridge.lua"
+        ],
+        "command_evidence": [
+          "command_confirm.lua",
+          "ids_gcs_bridge.lua"
+        ],
+        "gps_confidence": [
+          "gps_confirm.lua",
+          "ids_gcs_bridge.lua"
+        ],
+        "gps_evidence": [
+          "gps_confirm.lua",
+          "ids_gcs_bridge.lua"
+        ],
+        "gps_state": [
+          "ids_gcs_bridge.lua"
+        ],
+        "mavlink_confidence": [
+          "ids_gcs_bridge.lua",
+          "mavlink_confirm.lua"
+        ],
+        "mavlink_evidence": [
+          "ids_gcs_bridge.lua",
+          "mavlink_confirm.lua"
+        ],
+        "mavlink_state": [
+          "ids_gcs_bridge.lua"
+        ],
+        "command_state": [
+          "ids_gcs_bridge.lua"
+        ],
+        "rc_confidence": [
+          "ids_gcs_bridge.lua",
+          "jamming_confirm.lua"
+        ],
+        "rc_evidence": [
+          "ids_gcs_bridge.lua",
+          "jamming_confirm.lua"
+        ],
+        "rc_state": [
+          "ids_gcs_bridge.lua"
+        ],
+        "imu_confidence": [
+          "ids_gcs_bridge.lua",
+          "imu_confirm.lua"
+        ],
+        "imu_evidence": [
+          "ids_gcs_bridge.lua",
+          "imu_confirm.lua"
+        ],
+        "imu_state": [
+          "ids_gcs_bridge.lua"
+        ],
+        "mission_confidence": [
+          "ids_gcs_bridge.lua",
+          "mission_confirm.lua"
+        ],
+        "mission_evidence": [
+          "ids_gcs_bridge.lua",
+          "mission_confirm.lua"
+        ],
+        "mission_state": [
+          "ids_gcs_bridge.lua"
+        ],
+        "parameter_confidence": [
+          "ids_gcs_bridge.lua",
+          "parameter_confirm.lua"
+        ],
+        "parameter_evidence": [
+          "ids_gcs_bridge.lua",
+          "parameter_confirm.lua"
+        ],
+        "parameter_state": [
+          "ids_gcs_bridge.lua"
+        ],
+        "offboard_confidence": [
+          "ids_gcs_bridge.lua",
+          "offboard_confirm.lua"
+        ],
+        "offboard_evidence": [
+          "ids_gcs_bridge.lua",
+          "offboard_confirm.lua"
+        ],
+        "offboard_state": [
+          "ids_gcs_bridge.lua"
+        ]
+      },
+      "evidence": "called in Lua but not present in compiled binding"
+    }
+  ],
+  "discrepancies": [
+    {
+      "id": "DISC-001",
+      "summary": "Lua scripts call AP_IDS accessor methods that the compiled `ids` binding does not provide",
+      "detail": "binding exposes ['event_sequence', 'report_confirmed']; scripts call ['command_confidence', 'command_evidence', 'command_state', 'gps_confidence', 'gps_evidence', 'gps_state', 'imu_confidence', 'imu_evidence', 'imu_state', 'mavlink_confidence', 'mavlink_evidence', 'mavlink_state', 'mission_confidence', 'mission_evidence', 'mission_state', 'offboard_confidence', 'offboard_evidence', 'offboard_state', 'parameter_confidence', 'parameter_evidence', 'parameter_state', 'rc_confidence', 'rc_evidence', 'rc_state']",
+      "impact": "ids_gcs_bridge.lua and *_confirm.lua are expected to stop with a Lua runtime error on this build; PIDS|... and 'PUSHPAK IDS: ...' STATUSTEXT will not be emitted. The GCS parses them when present and surfaces Lua runtime errors as Lua-layer health.",
+      "resolution": "Regenerate bindings from AP_IDS_bindings.desc.append including the accessor methods, or change scripts to available API."
+    },
+    {
+      "id": "DISC-002",
+      "summary": "AP_IDSGCS::report_confirmed is a stub returning false",
+      "detail": "native confirmation reporting to the GCS is a no-op in this build",
+      "impact": "no native FC IDS telemetry reaches the GCS",
+      "resolution": "implement AP_IDSGCS transport"
+    },
+    {
+      "id": "DISC-003",
+      "summary": "AP_IDS::update() only drives a subset of detectors",
+      "detail": "invokes ['GPSDetector', 'IMUDetector', 'MissionDetector']; DETECTION_METHODS.md lists 8 detector families",
+      "impact": "FC-side states for the remaining detectors will not change on this build",
+      "resolution": "connect remaining native adapters (see VALIDATION.md 'Not yet end-to-end validated')"
+    },
+    {
+      "id": "DISC-004",
+      "summary": "PIDS state integer mapping unverified",
+      "detail": "CLEAR/SUSPECTED/CONFIRMED order is from DETECTION_METHODS.md; enum values not recoverable from stripped binary",
+      "impact": "GCS labels PIDS states 0/1/2 as CLEAR/SUSPECTED/CONFIRMED with an 'unverified mapping' flag",
+      "resolution": "confirm AP_IDS::State enum in AP_IDS.h"
+    }
+  ]
+}
