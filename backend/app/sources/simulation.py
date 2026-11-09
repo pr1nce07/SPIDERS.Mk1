@@ -6,8 +6,10 @@ the same decoder/normalizer/detector path as live data. Nothing is ever
 transmitted: the simulator has no transport and cannot reach a vehicle.
 
 PUSHPAK STATUSTEXT in PUSHPAK_CONFIRMATION uses the exact formats found in the
-supplied Lua sources; LUA_BINDING_MISMATCH reproduces the runtime error expected
-on the supplied firmware build (capabilities DISC-001).
+supplied Lua sources; LUA_BINDING_MISMATCH reproduces the runtime error the
+*original* scripts hit on the 26 Sep 2026 build (2-method `ids` binding). It is a
+health-path test only: build_v3 has the accessors and the current scripts no
+longer call them.
 """
 from __future__ import annotations
 
@@ -32,7 +34,7 @@ SCENARIOS = {
     "RC_DEGRADATION": "Gradual RSSI decline, rising radio errors, intermittent RC receiver loss.",
     "MULTI_SIGNAL_INCIDENT": "Unknown source + command burst + parameter change + GPS/EKF mismatch.",
     "PUSHPAK_CONFIRMATION": "GPS drift + FC PIDS + Lua confirmation STATUSTEXT (formats from supplied Lua).",
-    "LUA_BINDING_MISMATCH": "Lua runtime errors expected on the supplied build (ids:<method> missing).",
+    "LUA_BINDING_MISMATCH": "Lua runtime errors as seen with the original scripts on the 26 Sep 2026 build (ids:<method> missing).",
 }
 
 M_PER_DEG = 111_320.0

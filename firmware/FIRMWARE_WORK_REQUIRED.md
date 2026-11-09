@@ -13,13 +13,13 @@ This document lists the firmware changes needed to close the onboard gaps in *SP
 | ID | Work item | Gap | Priority | GCS side |
 |---|---|---|---|---|
 | FW-00 | Release baseline: APJ/ELF/source/ROMFS identity | GAP-14 | P0 | `scripts/make_release_manifest.py` ready |
-| FW-01 | Bench + HITL validation and timing instrumentation | GAP-01 | P0 | `PIDT` record format below; evaluation harness ready |
+| FW-01 | Bench + HITL validation and timing instrumentation | GAP-01 | P0 | `IDST` record format below; evaluation harness ready |
 | FW-02 | Resolve PreArm `flow_of_ctrl` | GAP-03 | P0 | — |
-| FW-03 | Native DataFlash IDS records `PIDS/PIDH/PIDC/PIDF` | GAP-05 | P1 | **Parses `PIDS/PIDH/PIDF` today** |
-| FW-04 | Passive `PARAM_SET` receive hook + `PIDW` record | GAP-06 | P1 | **Parses `PIDW` today** (sender, result) |
-| FW-05 | Accepted offboard setpoint observation + `PIDO` record | GAP-10 | P1 | Format reserved; consumer to add |
+| FW-03 | Native DataFlash IDS records `IDSE/IDSH/IDSC/IDSF` | GAP-05 | P1 | **Parses `IDSE/IDSH/IDSF` today** |
+| FW-04 | Passive `PARAM_SET` receive hook + `IDSW` record | GAP-06 | P1 | **Parses `IDSW` today** (sender, result) |
+| FW-05 | Accepted offboard setpoint observation + `IDSO` record | GAP-10 | P1 | Format reserved; consumer to add |
 | FW-06 | Boot ID, event sequence, ring overflow, PIDS v2 | GAP-07 | P1 | **Parses PIDS v2 and SYNC `boot=`/`drop=` today** |
-| FW-07 | Binding and detector completeness (DISC-001…004) | GAP-07/breadth | P1 | Bridge v2 already shipped in `firmware/scripts` |
+| FW-07 | ROMFS drift (DISC-005), binding choice, missing Lua inputs | GAP-07/breadth | P1 | Bridge v2 already shipped in `firmware/scripts` |
 | FW-08 | MAVLink signing on the vehicle: provisioning, policy, replay | GAP-08 | P1 | Keyring, export file and per-link policy ready |
 | FW-09 | Onboard approved-baseline check, replacing FNV-1a | GAP-11 | P1 | Signed GCS baseline ready |
 | FW-10 | Firmware root of trust, signed update, anti-rollback, recovery | GAP-04 | P0 | Release key and manifest ready |
@@ -32,7 +32,15 @@ Recommended order (it follows the blueprint's sprints): FW-00 → FW-02 → FW-1
 
 ## FW-00 — Release baseline and identity (Sprint 0, GAP-14)
 
-**Problem.** `firmware/BUILD_AND_LINKING.md` and `configs/capabilities.json` describe a build with a 2-method `ids` binding and old ROMFS scripts. The external technical reference describes `build_v3` with 26 binding methods and image SHA-256 `223c26f8…`. These cannot describe the same binary, and no artifact in this repository identifies the firmware that was tested.
+**Problem.** Three PUSHPAK builds exist, and no artifact in this repository is the release:
+
+| Build | APJ SHA-256 | Notes |
+|---|---|---|
+| 26 Sep 2026 | — | 2-method binding, stub `report_confirmed`, 3 of 8 detectors driven (the old DISC-001–004) |
+| build_v3, 4 Oct 2026 | `223c26f8…` | The technical reference's image. 26-method binding, all 8 detectors driven, `report_confirmed` implemented, state enum pinned by `static_assert`s. `configs/capabilities.json` was regenerated from it on 9 Nov 2026. Its ROMFS embeds older copies of 6 scripts (DISC-005). |
+| 14 Oct 2026 patch build | `3fab3632…` | `pushpak_ap_ids_Copter-4.7.1.patch`: all 8 detectors, real `report_confirmed`, but a 3-method binding (`get_channel` instead of the 24 accessors) |
+
+The build_v3 tree also has uncommitted changes outside AP_IDS (`git status` shows modified `Tools/` scripts), so even it is not tied to a clean, reviewed commit.
 
 **Do:**
 1. Pick the exact APJ/ELF pair under test. Archive the ArduPilot source at that commit, **including** `libraries/AP_IDS/`, every local patch and submodule revisions (`git submodule status`).
@@ -44,7 +52,7 @@ Recommended order (it follows the blueprint's sprints): FW-00 → FW-02 → FW-1
    ```bash
    python scripts/make_release_manifest.py --version <ver> --apj build/Pixhawk6C/bin/arducopter.apj --elf build/Pixhawk6C/bin/arducopter --source-archive ardupilot-<commit>-pushpak.tar.gz --patch "AP_IDS: <summary>" --patch "..."
    ```
-4. Extract the ROMFS from the built ELF and confirm it is byte-identical to the package. Re-run `scripts/discover_firmware.py` against the new ELF so `configs/capabilities.json` matches the binding actually compiled in.
+4. Extract the ROMFS from the built ELF and confirm it is byte-identical to the package. Re-run `scripts/discover_firmware.py --build-zip … --romfs-zip firmware/ROMFS_custom_fixed.zip --ap-ids-source <tree>/libraries/AP_IDS` against the release build so `configs/capabilities.json` matches the binding actually compiled in, with no DISC-005.
 5. Replace `BUILD_AND_LINKING.md` and the technical reference's version tables with a pointer to `release/manifest.json`.
 
 **Done when:** `make_release_manifest.py` reports `release_ready: true`, the project is under version control, and every test report cites `gcs_tree_sha256` and the APJ/ELF SHA-256 values.
@@ -56,11 +64,11 @@ Recommended order (it follows the blueprint's sprints): FW-00 → FW-02 → FW-1
 **Problem.** All evidence so far comes from SITL. The 5 Hz `SCHED_TASK(update_ids, 5, 900, 170)` budget, RAM and stack, and SD/DataFlash behaviour have never been measured on an STM32H743.
 
 **Firmware changes (test and release builds):**
-- Measure `update_ids()` with `AP_HAL::micros()` at entry and exit. Keep the maximum, a 64-bin histogram (for p99) and the overrun count (> 900 µs). Log them once per second as `PIDT`:
+- Measure `update_ids()` with `AP_HAL::micros()` at entry and exit. Keep the maximum, a 64-bin histogram (for p99) and the overrun count (> 900 µs). Log them once per second as `IDST`:
 
   | Name | Format | Fields |
   |---|---|---|
-  | `PIDT` | `QIIIIH` | `TimeUS, Boot, MaxUs, P99Us, Overruns, Det` (`Det` = detector with the longest last run) |
+  | `IDST` | `QIIIIH` | `TimeUS, Boot, MaxUs, P99Us, Overruns, Det` (`Det` = detector with the longest last run) |
 
 - Record the `AP_IDS` heap allocation at init and stack high-water marks. Compare against `@SYS/tasks.txt` and `@SYS/threads.txt` (scheduler task and thread statistics; check these exist at the pinned commit).
 
@@ -71,7 +79,7 @@ Recommended order (it follows the blueprint's sprints): FW-00 → FW-02 → FW-1
 4. Run HITL on the exact release before any controlled flight.
 5. Repeat on at least two boards.
 
-**Done when (V-001..V-003):** no IDS-attributable reset or scheduler miss; `PIDT.MaxUs` < 900 µs for every profile (report the maximum and p99, not the mean); RAM, stack and flash stay inside a written budget with margin.
+**Done when (V-001..V-003):** no IDS-attributable reset or scheduler miss; `IDST.MaxUs` < 900 µs for every profile (report the maximum and p99, not the mean); RAM, stack and flash stay inside a written budget with margin.
 
 ---
 
@@ -100,17 +108,19 @@ Recommended order (it follows the blueprint's sprints): FW-00 → FW-02 → FW-1
 
 **Do.** Add `libraries/AP_IDS/AP_IDS_Log.cpp/.h` behind `#if HAL_LOGGING_ENABLED && AP_IDS_LOGGING_ENABLED`, using `AP::logger().Write(...)` or registered `LOG_PACKET` structures (see *Adding a new DataFlash Log Message* in the ArduPilot dev docs). Put `TimeUS` first. Write on material state transitions and at a bounded health interval only, never per sample. Never log key material.
 
+**Naming.** ArduPilot already logs a DataFlash message called `PIDS` (the PID-steering log), and `PID*` is ArduPilot's PID-controller family. The IDS records therefore use the unused `IDS*` names. `discover_firmware.py` checks the ELF for `IDS*` log names.
+
 **Wire contract.** The GCS already decodes these from imported `.bin`/`.log` files (`backend/app/ids/pushpak_fc.py::_dataflash`):
 
 | Name | Format | Fields | GCS behaviour |
 |---|---|---|---|
-| `PIDS` | `QIIBBHffB` | `TimeUS, Boot, Seq, Det, St, Ev, Conf, Met, Inst` | Becomes an FC detector result, identical to a live PIDS line. Duplicates are removed by `(Boot, Seq)`. |
-| `PIDH` | `QIIHBIIH` | `TimeUS, Boot, Health, Scr, QOcc, QDrop, LogDrop, Age` | An increase in `QDrop`/`LogDrop` raises an "event loss on board" health result. |
-| `PIDC` | `QIIII` | `TimeUS, Boot, CfgVer, ThrProf, BuildId` | Kept as `DF_PIDC` with configuration and build identity (case metadata). |
-| `PIDF` | `QIHBB` | `TimeUS, Boot, Code, Sub, Rec` | Raises an AP_IDS fault health result. |
+| `IDSE` | `QIIBBHffB` | `TimeUS, Boot, Seq, Det, St, Ev, Conf, Met, Inst` | Becomes an FC detector result, identical to a live PIDS STATUSTEXT line. Duplicates are removed by `(Boot, Seq)`. |
+| `IDSH` | `QIIHBIIH` | `TimeUS, Boot, Health, Scr, QOcc, QDrop, LogDrop, Age` | An increase in `QDrop`/`LogDrop` raises an "event loss on board" health result. |
+| `IDSC` | `QIIII` | `TimeUS, Boot, CfgVer, ThrProf, BuildId` | Kept as `DF_IDSC` with configuration and build identity (case metadata). |
+| `IDSF` | `QIHBB` | `TimeUS, Boot, Code, Sub, Rec` | Raises an AP_IDS fault health result. |
 
 - `Det` indexes `GPS=0, MAVLINK=1, COMMAND=2, RC_LINK=3, IMU=4, MISSION=5, PARAMETER=6, OFFBOARD=7` (the order of `PIDS_DETECTORS` in `backend/app/mavlink/pushpak.py`).
-- `St` values: `0=CLEAR, 1=SUSPECTED, 2=CONFIRMED`. They must match what the Lua bridge announces in `STATEMAP`.
+- `St` values: `0=CLEAR, 1=SUSPECTED, 2=CONFIRMED`, as pinned by the `static_assert`s in build_v3's `AP_IDS.h`. They must match what the Lua bridge announces in `STATEMAP`.
 - `Health`: one bit per detector (1 = running), with bit 31 set for logging-degraded.
 - `QOcc` / `QDrop`: ring occupancy and cumulative overflow count. `LogDrop`: records the logger refused.
 
@@ -137,7 +147,7 @@ Recommended order (it follows the blueprint's sprints): FW-00 → FW-02 → FW-1
 
 | Name | Format | Fields |
 |---|---|---|
-| `PIDW` | `QIBBBBNfBB` | `TimeUS, Boot, Sys, Comp, Chan, Sig, Name, Val, Typ, Res` — `Sig`: 0 none/1 valid/2 invalid; `Res`: 0 requested/1 applied/2 rejected |
+| `IDSW` | `QIBBBBNfBB` | `TimeUS, Boot, Sys, Comp, Chan, Sig, Name, Val, Typ, Res` — `Sig`: 0 none/1 valid/2 invalid; `Res`: 0 requested/1 applied/2 rejected |
 
 **Tests (V-011, V-012):** cover these cases:
 - one write;
@@ -162,11 +172,11 @@ Show that existing parameter handling is byte-for-byte unchanged (same ACK/PARAM
 2. Use one `OffboardObservation` structure with: sender, signing status, target, message ID, frame, type mask, inter-arrival time, `accepted`/`ignored` plus the reason, mode and armed state.
 3. Keep receive-time and acceptance observations separate.
 
-**Wire contract (reserved; the GCS keeps it as `DF_PIDO` until a consumer is added):**
+**Wire contract (reserved; the GCS keeps it as `DF_IDSO` until a consumer is added):**
 
 | Name | Format | Fields |
 |---|---|---|
-| `PIDO` | `QIBBBBHBHBf` | `TimeUS, Boot, Sys, Comp, Chan, Sig, MsgId, Frame, Mask, Acc, RateHz` |
+| `IDSO` | `QIBBBBHBHBf` | `TimeUS, Boot, Sys, Comp, Chan, Sig, MsgId, Frame, Mask, Acc, RateHz` |
 
 **Done when (V-018):** accepted setpoint sender, rate and freshness are recorded. Stale, bursty, unexpected-source and invalid-frame cases can be told apart. A static target is not taken to mean "no traffic", and GUIDED behaviour is unchanged.
 
@@ -178,7 +188,7 @@ Show that existing parameter handling is byte-for-byte unchanged (same ACK/PARAM
 
 **Do.**
 1. At AP_IDS init, generate a 32-bit `boot_id`, for example from `hal.util->get_hw_rtc()` mixed with a persistent boot counter. Keep a monotonic `event_seq` per boot.
-2. Add an overflow counter to the 8-slot ring and increment it whenever an unread event is overwritten.
+2. Add an overflow counter to the 8-slot ring (`EVENT_RING_SIZE = 8` in build_v3) and increment it whenever an unread event is overwritten.
 3. Emit native PIDS STATUSTEXT in **version 2**. The GCS parser already accepts it, and v1 still parses:
    ```text
    PIDS|2|FC|<DET>|<state>|<conf>|<evidence>|<metric>|<instance>|<boot_id>|<seq>
@@ -194,17 +204,22 @@ Show that existing parameter handling is byte-for-byte unchanged (same ACK/PARAM
 
 ---
 
-## FW-07 — Binding and detector completeness (DISC-001…004, detection breadth)
+## FW-07 — ROMFS drift, binding choice and missing Lua inputs
 
-Findings in `configs/capabilities.json` that only the firmware can close:
+DISC-001 to DISC-004 described the 26 Sep 2026 build and are **resolved in build_v3**, as checked against its ELF and source on 9 Nov 2026:
+- 26-method binding;
+- `AP_IDSGCS::report_confirmed` implemented (372 bytes, not `return false`);
+- all 8 detectors driven: GPS, IMU and Mission from `AP_IDS::update`; RC from `update_rc_link`; Parameter from `update_parameters`; Offboard from `Copter::update_ids_offboard`; MAVLink and Command from `GCS_MAVLINK_Copter::packetReceived`;
+- state enum fixed by `static_assert`s.
 
-| Finding | Work |
+What is still open:
+
+| Item | Work |
 |---|---|
-| DISC-001 — scripts used `ids:<det>_state/_confidence/_evidence()`, which do not exist | The scripts were rewritten to avoid them. If accessor methods are wanted, add them to `bindings.desc` and regenerate; otherwise remove them from all documentation. |
-| DISC-002 — `AP_IDSGCS::report_confirmed()` is a stub returning false | Implement it: store the Lua confirmation in the AP_IDS event ring, log it as `PIDS` with `Inst` marking Lua origin, and return true only once it has been accepted. |
-| DISC-003 — `AP_IDS::update()` drives only some detectors (GPS, IMU, Mission are active) | Drive all 8 families, or document which ones are intentionally inactive, and report the active set in `PIDC`/`PIDH.Health`. |
-| DISC-004 — PIDS state integer mapping unverified | Fix the enum as `0=CLEAR, 1=SUSPECTED, 2=CONFIRMED` in the C++ header and add a static assert. The bridge `STATEMAP` line announces the Lua side. |
-| Missing Lua inputs (README "Coverage limits") | Add read-only bindings for: per-channel MAVLink packet/drop statistics; RC RSSI; a command-received event (from the FW-04 / FW-05 observers); offboard setpoint stats. Each new binding must be added to the strict test mocks (`backend/tests/test_lua_scripts.py::ALLOWED`). |
+| DISC-005 — build_v3's ROMFS embeds older `command_confirm`, `ids_gcs_bridge`, `jamming_confirm`, `mavlink_confirm`, `offboard_confirm`, `modules/ids_common` (comment-only) | Rebuild with `firmware/ROMFS_custom_fixed.zip` (bridge protocol v2). Until then load the scripts from the SD card with `SCR_DIR_DISABLE=1` so the ROMFS copies don't also run. |
+| Binding differs between build_v3 (26 methods) and the 14 Oct build (3 methods, `get_channel`) | Pick one for the release (FW-00). The shipped scripts use only `report_confirmed` and `event_sequence`, so they work with either; keep it that way, or update the strict test mocks (`backend/tests/test_lua_scripts.py::ALLOWED`) if the scripts start using accessors. |
+| `report_confirmed` from Lua | Confirm that Lua confirmations end up in the AP_IDS event ring and, once FW-03 lands, in `IDSE` records with `Inst` marking Lua origin. |
+| Missing Lua inputs (README "Coverage limits"; also true on build_v3) | Add read-only bindings for: per-channel MAVLink packet/drop statistics; RC RSSI; a command-received event (from the FW-04 / FW-05 observers); offboard setpoint stats. Add each to the strict test mocks. |
 
 **Test environment note.** The Lua tests (`test_lua_scripts.py`, the bridge tests in `test_event_delivery.py`) need the `lupa` package (Lua 5.4). It is not in `backend/requirements.txt` and is not installed in the current venv, so those tests are **skipped**. Install it in CI before relying on them.
 
@@ -236,7 +251,7 @@ Findings in `configs/capabilities.json` that only the firmware can close:
 
 **Firmware work:**
 1. Replace the FNV-1a mission hash with a cryptographic digest (SHA-256 or BLAKE2b) used as the change detector. Check whether a crypto library is already in the tree at the pinned commit; the secure bootloader support uses monocypher. FNV-1a can be forged on purpose and must not be called an integrity check.
-2. Optional, stronger version: provision the approved digest of the sensitive parameters and the mission into protected storage over the maintenance link. Check it before arming and report a mismatch as a PreArm *warning* plus a `PIDF`/`PIDS` event. It must not block arming unless the safety case explicitly allows that (blueprint §7.3: detection stays separate from response).
+2. Optional, stronger version: provision the approved digest of the sensitive parameters and the mission into protected storage over the maintenance link. Check it before arming and report a mismatch as a PreArm *warning* plus an `IDSF`/`IDSE` event. It must not block arming unless the safety case explicitly allows that (blueprint §7.3: detection stays separate from response).
 3. Seed the onboard parameter and mission detectors from the approved values, not from first observation.
 
 **Done when (V-019):** a parameter or mission changed before boot is detected against the approved digest; an approved maintenance change is recorded with operator identity; a manifest for another vehicle is rejected.
@@ -274,8 +289,8 @@ The GCS release manifest is signed with an Ed25519 "release" key (`release/manif
 ## FW-12 — Safety invariants, fault-injection build, CI (SAFE-01, SAFE-02)
 
 1. **Static check in CI.** Fail the build if any file under `libraries/AP_IDS/` calls the control APIs (mode set, arm/disarm, failsafe, mission or position-target setters, RC override, motor output). Keep an explicit allowlist of AP_IDS's read-only accessors.
-2. **Fault-injection build flag** `AP_IDS_FAULT_INJECTION`, for test builds only and never in release. It forces a detector exception, invalid input, a full queue, an SD write error, a script restart and an IDS restart. Every injected fault must produce a `PIDF` record, and the autopilot must keep flying normally.
-3. **SITL autotest steps** for FW-02 (no PreArm internal error), FW-04 (burst observed), FW-06 (PIDS v2 sequence continuity) and FW-03 (DataFlash replay matches the live events).
+2. **Fault-injection build flag** `AP_IDS_FAULT_INJECTION`, for test builds only and never in release. It forces a detector exception, invalid input, a full queue, an SD write error, a script restart and an IDS restart. Every injected fault must produce an `IDSF` record, and the autopilot must keep flying normally.
+3. **SITL autotest steps** for FW-02 (no PreArm internal error), FW-04 (burst observed), FW-06 (PIDS v2 sequence continuity) and FW-03 (DataFlash `IDSE` replay matches the live events).
 4. **Lua tests in CI** with `lupa` installed, against the strict binding mocks updated for any new methods.
 
 ---
@@ -286,7 +301,7 @@ The GCS release manifest is signed with an Ed25519 "release" key (`release/manif
 |---|---|
 | Evidence lineage / independence | `backend/app/ids/lineage.py`, `correlation.py`; tests `test_lineage.py` |
 | Bridge v2, delivery tracking, reboot and dup detection | `firmware/scripts/ids_gcs_bridge.lua`, `backend/app/mavlink/pushpak.py::EventDeliveryTracker`; `test_event_delivery.py` |
-| DataFlash PIDS/PIDH/PIDF/PIDW and PIDS v2 / SYNC boot= drop= | `pushpak_fc.py::_dataflash`, `sources/files.py`; `test_firmware_contract.py` |
+| DataFlash IDSE/IDSH/IDSF/IDSW and PIDS v2 STATUSTEXT / SYNC boot= drop= | `pushpak_fc.py::_dataflash`, `sources/files.py`; `test_firmware_contract.py` |
 | Signing keyring, per-link policy, four facts | `backend/app/security/keys.py`, `ids/mavlink.py`; Settings → Security |
 | Signed cases, custody, audit checkpoints | `backend/app/security/evidence.py`, `forensic/snapshot.py`; `test_trust_controls.py` |
 | Approved baseline | `backend/app/security/baseline.py`, `ids/baseline.py` |

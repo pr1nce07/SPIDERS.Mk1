@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release_version": "1.1.0-dev",
-  "generated_at": "2026-11-09T05:28:10.907695+00:00",
+  "generated_at": "2026-11-09T06:28:50.153977+00:00",
   "generator": {
     "python": "3.14.0",
     "platform": "Windows-11-10.0.26200-SP0"
@@ -13,7 +13,7 @@
       "firmware": "ArduCopter V4.7.1 (dbe79216)",
       "git_commit": "dbe79216"
     },
-    "capabilities_generated_at": "2026-09-27T11:15:13.008270+00:00",
+    "capabilities_generated_at": "2026-11-09T06:27:23.349002+00:00",
     "local_patches": [],
     "images": {}
   },
@@ -34,7 +34,7 @@
     "backend/app/core/bus.py": "ff2514144b094584fc69d19e0bb5bf39be70d8a87186fdb271631510a1f1b645",
     "backend/app/core/errors.py": "37e732c5358badb47e20a3d6139f6b647537442cb7dfacf7a66a2118ef5ed3ca",
     "backend/app/core/pipeline.py": "9b9719ac2e1a4285e672e31f60a518750e9b12c33b81886c74ac9b1c3a1e9818",
-    "backend/app/core/runtime.py": "f784b71a25d4cada70df38387712d5831e044c3ec321efa4bceef478d512bdae",
+    "backend/app/core/runtime.py": "e76e0c8aa436649c26d7faeb9637f447089043d0384d074c974e6b5b50079bf4",
     "backend/app/evaluation.py": "fd077c9e7dd765eb209d272fad61d22512167a28353b17626769d818e5105436",
     "backend/app/forensic/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/forensic/hashing.py": "a97ac1d991bf7a178c51a28b84d2a0a422d30b69d882b00ff322ff51c14419c5",
@@ -46,7 +46,7 @@
     "backend/app/ids/baseline.py": "3e7f577e31a4961feae756eab2d077772def9e37704de699bfaa0c8f172ca78c",
     "backend/app/ids/builtin_rules.py": "235608a4e696a80cf765f0954e7b42db88e01b7d73f015879d69a9e237e20da9",
     "backend/app/ids/command.py": "50fe0c21f61976aaabadfc001f6907d58e6ab8c761151a767bc51f18709651bf",
-    "backend/app/ids/correlation.py": "9d99bd6a31f516689a2a6ccfd03b4cdeae97efbc97f5b7f33bdfc6f9803c2c61",
+    "backend/app/ids/correlation.py": "218f5ff15fbd3b9efa00097c8d3f688c6e986365224ac90ff053f4840f8324a1",
     "backend/app/ids/engine.py": "bee42ad94000aa96deb7e33d020b97a479e2344e9ef899e588de948d94f8ceb0",
     "backend/app/ids/gps.py": "3c5a025cd7decf00dc826290b90b205a915b98bd69e846c734d491e93e3888a4",
     "backend/app/ids/imu.py": "ad368ac004b3a8d55462d978548d1c0cb02679e61cadacbb576334f5481da875",
@@ -57,7 +57,7 @@
     "backend/app/ids/ml_profiles.py": "2066c8605d212e28405cb30a03ac8e1c4f325772de32235c7f3a8795c2400f19",
     "backend/app/ids/offboard.py": "76d5304d77f6df027fab8db112aa9964a7253141f90e1b69438bfb26c8fa65da",
     "backend/app/ids/parameter.py": "8dca5111eff3ed541ad63c1730b62c3a29b46e45767a9471e29a6b0fa606f639",
-    "backend/app/ids/pushpak_fc.py": "8e1a9568ad567cdb48d9cc80eb9ee012371ae713c91b63cbc5cef790f5ab0953",
+    "backend/app/ids/pushpak_fc.py": "1565c6eda52f9f134a28020fa0352f151890c1f5f7d98efc35045e6f9759fedd",
     "backend/app/ids/rc.py": "3ed5bf132b8f382a47040cbfba5c7e3fc66d4949a219ebfd782202ba5208b228",
     "backend/app/ids/rule_store.py": "c29790243a396a88be441a789b2e6997b749abcec3b8efeba002008aee1eff3f",
     "backend/app/ids/rules.py": "9f575fc93d8d3900290db4884d7a66bac36a401a0c019eb169cc4cced137e817",
@@ -68,12 +68,12 @@
     "backend/app/mavlink/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/mavlink/decoder.py": "317055fee31abaf424ac84090bfe9aa2867a8a0c46da05ae3424406efa0ed113",
     "backend/app/mavlink/normalizer.py": "c09f15e69e31db5381b5eb0df0cf3ff697f48e7f9bb42cfd04039198623a9056",
-    "backend/app/mavlink/pushpak.py": "62674329b985f15a980de57f0ccffc46c62a515811937ffa09f640a7a2ce1637",
+    "backend/app/mavlink/pushpak.py": "d21e9dae6774cfa3762c6a437b9c7a1315b55568f581d40aa42c8394a8756e3d",
     "backend/app/mavlink/registry.py": "c70e0e967a70bc3ca8c619c416cdbf78d87f9e16046b51d65cfdc55cbca83235",
     "backend/app/models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/models/events.py": "a0de834dc21c91ce3b2532551d350f84d4daf1936d3d2187f47e65cf3595e5d6",
     "backend/app/models/observation.py": "d76626159a20083b88de62a9f415aa9c39585f180eb265f5aa5e0e45bf5dc08e",
-    "backend/app/release.py": "fd7f762ffa2a742a77fcd97d2be6ba808e143fa85277a55073509dd2cdd99aca",
+    "backend/app/release.py": "ba4c0002eecabcce657decd1f478e00e1da1ca573128fbcb4bb68f277220ca5d",
     "backend/app/security/__init__.py": "27e2c590769c5db4fb8db500f9ff077ddec4f026d03a70118747393ba6eb7a42",
     "backend/app/security/baseline.py": "1ee6bb9b052191b7a470fad60f53cf990f70168ec5c0666cd3b094fc57794348",
     "backend/app/security/evidence.py": "32833c2c709f76645d5415547b22b6262b02564a046b7d16100727852b4c8883",
@@ -90,18 +90,18 @@
     "backend/app/silktrace/sandbox.py": "cb10b172ef9bdb919441097be603a21f4b8ec85e241a3b16e6fa1a918573d63f",
     "backend/app/silktrace/service.py": "5b048ef274427baafa69a01084ca3a9ad7396f3651285e446cab280a29202c1b",
     "backend/app/sources/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/sources/files.py": "baefcd030bc2c76b15ddc85cd911a262f3a406c7a727cc62cd3c7e800ca4b8d5",
+    "backend/app/sources/files.py": "55bf48c8dad8e9a5deeeb01c342c2afba2159a2af6baabde9a4e51c8cf7ba1ba",
     "backend/app/sources/live.py": "66ed4a9c170805f2b92f84dc2cb3782cf09bb379ae2818840d3fecea07d26d48",
-    "backend/app/sources/simulation.py": "1dbe11ca9b3e550aa593d26926b35c6a8a6e4eb2c4d7dcbeb5dffa1b8746294d",
+    "backend/app/sources/simulation.py": "0a40945df3d83bd892abb8e8a340674bd7ea06f2353e36d68a03374b0b0dc118",
     "backend/app/storage/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/storage/db.py": "7ff0ed72259e5272018f5afd74e90fd6ac1fff5319a588855c6402b5902b8472",
     "backend/app/websocket/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/websocket/hub.py": "663a5a26a740fe8d11998ce5f2cac693a0ca40453a1d549205e9cd00bf82c4f0",
     "backend/requirements.txt": "fcb3ec4104b6ef2be2175036b2f1911e7d0d77bc3f6e818c02fe076e0bf1d3e8",
     "backend/run.py": "178b15f2e789c142b561cd1daa7a4f98a1e2b3465890dfbd27dc2b46e2eabc8c",
-    "configs/capabilities.json": "2704ecedc8b0567e09e6ebb5fb63df7d957c67ea99c4f0b45b00aae1db994818",
+    "configs/capabilities.json": "9ce61b97ea70b181f7e4c61fd335068eb1b5fe9643c5b74a7c113996ad7f5d3b",
     "configs/default.yaml": "e045c189537f3961cbf48b88e6916208d6ab34abad79a618127de7234ad79a75",
-    "firmware/ROMFS_custom_fixed.zip": "8e49a99b16963afd6837e190c8f5cdc83868e7ccbd81a522ef31d19a3ec033a9",
+    "firmware/ROMFS_custom_fixed.zip": "1d69052b94685083cf1cf698d7b6f126a680203a86caef2278b1fcbac6fd7aff",
     "firmware/scripts/command_confirm.lua": "18f67ccec024d3fd8800f85477cb8dfb1218d3092263954b42434256dee23802",
     "firmware/scripts/gps_confirm.lua": "b250231b6bf4f3575754aed86c2dd6852ab6f168d5715c6985a019f191088bae",
     "firmware/scripts/ids_gcs_bridge.lua": "7783a8b191e6bff6fe3058c1bd32fa86efaa6fccb08cd6cf6a08595f7ff7563e",
@@ -109,19 +109,19 @@
     "firmware/scripts/jamming_confirm.lua": "d5dd26867235dd2a20376fc4ec4dcf05e4f4b167be253bb73f4e124f6edade9f",
     "firmware/scripts/mavlink_confirm.lua": "6083b294993ab423465ee9eda500f78df62e80713fc618eab52e1299bc41c65b",
     "firmware/scripts/mission_confirm.lua": "cccb737492bf148d16042ca12d9e802b105cbbb646c2598239dce146fbf0f9c5",
-    "firmware/scripts/modules/ids_common.lua": "dcbdd284cbbca512d6b918a96dc2256232d37ca42aed7d4b8a275d89c2ddb0b6",
+    "firmware/scripts/modules/ids_common.lua": "c8f599981d03ddf5ec4b3cd045f5a4c12518d1f5bf282be5132e1c597befd94d",
     "firmware/scripts/offboard_confirm.lua": "d07ac068ab1d09c2bc89c27689f90476b0095cf733a81cee163f47efecdc5b44",
     "firmware/scripts/parameter_confirm.lua": "5ffefe63eb220db6da555dabaf6462e1a092207f67cb8a8f9153dc4f1bd5f66c",
-    "frontend/dist/assets/html2canvas-ivrlWmZn.js": "55cea88fc0e261ff77d0e6f01847432aaed884b3e75871b104843b22be9ff4ed",
+    "frontend/dist/assets/html2canvas-1_ZIXRyX.js": "6013ada0deece5f8005e1f9f0e587d3eab3e2c73136b15bdfb0fac33fb5886ac",
     "frontend/dist/assets/index-6wH9TfMZ.css": "c4b4def681133d544a18cab08a3ff5fd6121e9c1c71adbc96aa185999d264ebd",
-    "frontend/dist/assets/index-CPmkYJYv.js": "edc24c2aa9335a3f2e372696cc1552169d6b0f50134224a4b2f1e9ac524bbe54",
+    "frontend/dist/assets/index-Cy7oSRgC.js": "5e04f95c0a416a93f3f9d8451516945b6b0909ea1081e5b14b10ce34648214ab",
     "frontend/dist/brand/favicon.png": "78b46e5460e1585005ea6894caa576a2024a3332295e4ae64f2ad604cd558160",
     "frontend/dist/brand/spider-mask-128.png": "baafe11ba08e9224cdfa30c8cc306c157ece92ca5649272c3393a1dbc0b183e2",
     "frontend/dist/brand/spider-mask.png": "073a8de4384a272b18a47b57e5b1a84978c4a5d8ce0176566fc28da6995c86d7",
-    "frontend/dist/index.html": "4c2b98568639e767636a51bcb4e85f0834bf4c413d94dee0c1c6433c1828703a",
+    "frontend/dist/index.html": "009c34f3877fd1a42ad1e0ca059a44de62fe9a3ae7140edcf868789ae17f0428",
     "frontend/package-lock.json": "d6dabadca201e8a516686789f18ef23266dc975d896a89767d46a166ccbb5303",
     "frontend/package.json": "ad06f341d559bf0d9bac5fd1779307d32b50b218e97c07853f78c5e327a28384",
-    "scripts/discover_firmware.py": "58e0e2c30c875806e2a8753af2666c0ccd330b1c2b92d69db33028bc8fac715d",
+    "scripts/discover_firmware.py": "b4253795a052a6a7922f2c0e562ce593ce927ea45fab791ff8b50b4ff71ae92f",
     "scripts/evaluate_detectors.py": "0f97e4b0f3415ada231f70bcdbd5cc516b9044def158eabcd98546313379809b",
     "scripts/fill_report_table.py": "bcb96e4cba934f7a9ff5ecc5f04a8e3542413f46e76c5f2597a2251cf41d1d0e",
     "scripts/make_release_manifest.py": "89e8c6a39f4172d5249a30783ebb5b6467c45907c9380bd2d100c91cf80ce16e",
@@ -131,7 +131,7 @@
     "scripts/start.sh": "64248fc8dcab2262d5b12f9b3732fb38926e0ef6e2ee3dae6126c8e405bcba98",
     "scripts/test.sh": "24f87e3759028d3d391af9cb62399efc2fd3d6814094acddc8e886392785a5eb"
   },
-  "gcs_tree_sha256": "85a5f444eb05fc4ea66f33a58059a988951ac381e5de615ad0a31b648ff249a0",
+  "gcs_tree_sha256": "24ba358dc9035ebfc73a95da58a629b9dce797c64bcdd4d465a1432f06548700",
   "findings": [
     {
       "id": "REL-FW-IMAGES",
@@ -144,29 +144,14 @@
       "text": "ArduPilot source archive/commit with local patches not supplied (AP_IDS source is not in this repository)."
     },
     {
-      "id": "CAP-DISC-001",
+      "id": "CAP-DISC-005",
       "severity": "INFO",
-      "text": "Lua scripts call AP_IDS accessor methods that the compiled `ids` binding does not provide"
-    },
-    {
-      "id": "CAP-DISC-002",
-      "severity": "INFO",
-      "text": "AP_IDSGCS::report_confirmed is a stub returning false"
-    },
-    {
-      "id": "CAP-DISC-003",
-      "severity": "INFO",
-      "text": "AP_IDS::update() only drives a subset of detectors"
-    },
-    {
-      "id": "CAP-DISC-004",
-      "severity": "INFO",
-      "text": "PIDS state integer mapping unverified"
+      "text": "Firmware image embeds different Lua scripts than the supplied ROMFS package"
     },
     {
       "id": "REL-DOC-BASELINE",
       "severity": "WARNING",
-      "text": "firmware/BUILD_AND_LINKING.md and configs/capabilities.json describe the 2-method `ids` binding build; the external technical reference describes build_v3 (26 methods). Treat this manifest's hashes as authoritative."
+      "text": "Three PUSHPAK firmware builds exist (26 Sep 2026, build_v3 APJ 223c26f8, 14 Oct 2026 APJ 3fab3632). configs/capabilities.json describes build_v3; which one is the release is not fixed until the APJ/ELF are supplied here. Treat this manifest's hashes as authoritative."
     },
     {
       "id": "REL-NO-VCS",

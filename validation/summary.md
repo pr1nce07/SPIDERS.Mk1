@@ -2,6 +2,8 @@
 
 Generated 2026-09-27T05:39:22Z by `scripts/run_validation.py` (10 runs per test, master seed 2026).
 
+> **Note (2026-11-09):** this is a dated record. Since then the correlator counts evidence by independent sensor/data path (`backend/app/ids/lineage.py`). A re-run on 9 Nov 2026 (same seed, old vs new code) gave the same detection rates (10/10 for every attack, 0 false alerts, 0 Lua script errors), but different incident states: TC-02 CONFIRMED 10 → CORRELATED 10 (GPS-only evidence is one line), TC-03 CONFIRMED 10 → CONFIRMED 5 / CORRELATED 5, TC-04 CORRELATED 10 → CONFIRMED 4 / CORRELATED 6. TC-05 and TC-06 are unchanged. Re-run `scripts/run_validation.py` to refresh this table.
+
 | Test ID | Attack Scenario | Data Source | Expected IDS Observation | Detection Indicator / Success Criteria | Verdict |
 |---|---|---|---|---|---|
 | TC-01 | Benign baseline: armed takeoff, GUIDED→AUTO waypoint mission, RTL; no injected attack (sensor noise varies per run) | All vehicle MAVLink (HEARTBEAT, GPS_RAW_INT, GLOBAL_POSITION_INT, EKF_STATUS_REPORT, RAW_IMU/SCALED_IMU2, SYS_STATUS, RC_CHANNELS, RADIO_STATUS, MISSION_*, PARAM_*); all 8 Lua scripts | No ANOMALOUS/SUSPECTED alerts, no incident; Lua scripts stay CLEAR (only BRIDGE announcement) | 0 false-positive alerts and 0 incidents per run; 0 Lua SUSPECTED/CONFIRMED. Result (10 varied simulated runs): 0 ground false alerts, 0 incidents, 0 Lua SUSPECTED/CONFIRMED. | PASS |
