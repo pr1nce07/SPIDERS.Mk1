@@ -5,7 +5,13 @@ nothing is set true without proof.
 
 Usage:
   python scripts/discover_firmware.py --build-zip <build.zip> --romfs-zip <ROMFS_custom.zip> \
-      [--objdump arm-none-eabi-objdump] [--out configs/capabilities.json]
+      [--ap-ids-source <ardupilot>/libraries/AP_IDS] [--objdump arm-none-eabi-objdump] [--out configs/capabilities.json]
+
+Detector wiring is read from the binary: a detector family counts as driven when
+any function outside that detector calls its update()/observe() (AP_IDS::update,
+Copter::update_ids_offboard, GCS_MAVLINK_Copter::packetReceived, ...). The PIDS
+state enum cannot be recovered from a stripped binary; it is verified only from
+the AP_IDS source's static_asserts when --ap-ids-source is given.
 """
 from __future__ import annotations
 
@@ -40,10 +46,16 @@ def safe_read(z: zipfile.ZipFile, name: str) -> bytes | None:
         return None
 
 
+DETECTOR_FAMILY = {"GPSDetector": "GPS", "MAVLinkDetector": "MAVLINK", "CommandDetector": "COMMAND", "RCDetector": "RC_LINK",
+                   "IMUDetector": "IMU", "MissionDetector": "MISSION", "ParameterDetector": "PARAMETER",
+                   "OffboardDetector": "OFFBOARD"}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--build-zip", required=True)
     ap.add_argument("--romfs-zip", required=True)
+    ap.add_argument("--ap-ids-source", help="libraries/AP_IDS directory of the source tree that produced the build")
     ap.add_argument("--objdump", default=shutil.which("arm-none-eabi-objdump"))
     ap.add_argument("--out", default=str(ROOT / "configs" / "capabilities.json"))
     a = ap.parse_args()
@@ -103,11 +115,21 @@ def main() -> int:
             if upd:
                 called = sorted(set(re.findall(r"<(\w+Detector)::update", upd.group(1))))
                 dis_facts["AP_IDS.update_invokes"] = called
+            # Every call site of <Detector>::update/observe outside the detector itself, across the whole image.
+            callers: dict[str, set] = {}
+            for fn_name, body in re.findall(r"^[0-9a-f]+ <(.+?)>:\n((?:(?![0-9a-f]+ <).*\n)*)", out, re.M):
+                for cls in set(re.findall(r"<(\w+Detector)::(?:update|observe)\(", body)):
+                    if cls in DETECTOR_FAMILY and not fn_name.startswith(cls + "::"):
+                        callers.setdefault(cls, set()).add(fn_name.split("(")[0])
+            dis_facts["detector_callers"] = {c: sorted(v) for c, v in sorted(callers.items())}
             linked = sorted(set(re.findall(r"<(\w+Detector)::\w+\(", out)))
             dis_facts["linked_detector_classes"] = linked
         finally:
             Path(elf_path).unlink(missing_ok=True)
-        fact("ap_ids.update_invokes_detectors", dis_facts.get("AP_IDS.update_invokes"), "objdump of AP_IDS::update(): direct calls")
+        fact("ap_ids.update_invokes_detectors", dis_facts.get("AP_IDS.update_invokes"),
+             "objdump of AP_IDS::update(): direct <Detector>::update calls only")
+        fact("ap_ids.detector_call_sites", dis_facts.get("detector_callers"),
+             "objdump: functions outside each detector that call its update()/observe()")
         fact("ap_ids.linked_detector_classes", dis_facts.get("linked_detector_classes"), "objdump: detector methods present in final ELF")
         fact("ap_ids.gcs_report_is_stub", dis_facts.get("AP_IDSGCS.report_confirmed_stub"), "objdump: AP_IDSGCS::report_confirmed = `movs r0,#0; bx lr`")
 
@@ -122,14 +144,28 @@ def main() -> int:
     embedded = {m.group(1): int(m.group(2)) for m in re.finditer(r'\{ "(scripts/[^"]+)", sizeof\(ap_romfs_\d+\), (\d+),', romfs_h)}
     fact("romfs.embedded_scripts", embedded, "build/Pixhawk6C/ap_romfs_embedded.h")
 
+    # PIDS state enum: only provable from source (static_asserts), never from the stripped binary.
+    enum_ok = None
+    if a.ap_ids_source:
+        h = Path(a.ap_ids_source) / "AP_IDS.h"
+        src = h.read_text(errors="ignore") if h.exists() else ""
+        want = {"CLEAR": 0, "SUSPECTED": 1, "CONFIRMED": 2}
+        got = {m.group(1): int(m.group(2)) for m in
+               re.finditer(r"static_assert\(static_cast<uint8_t>\(State::(\w+)\)\s*==\s*(\d+)", src)}
+        enum_ok = all(got.get(k) == v for k, v in want.items())
+        fact("ap_ids.state_enum_static_asserts", got or None, f"{h.name} static_assert(static_cast<uint8_t>(State::X) == n)")
+        ring = re.search(r"EVENT_RING_SIZE\s*=\s*(\d+)", src)
+        fact("ap_ids.event_ring_size", int(ring.group(1)) if ring else None, f"{h.name} EVENT_RING_SIZE")
+
     rz = zipfile.ZipFile(a.romfs_zip)
     scripts = {}
     method_calls: dict[str, set] = {}
     for n in rz.namelist():
         if n.endswith(".lua"):
             b = rz.read(n)
+            rel = n.split("scripts/", 1)[-1]  # keep modules/ in the path (scripts/modules/ids_common.lua)
             scripts[Path(n).name] = {"size": len(b), "sha256": sha256(b),
-                                     "embedded_size_match": embedded.get(f"scripts/{Path(n).name}") == len(b)}
+                                     "embedded_size_match": embedded.get(f"scripts/{rel}") == len(b)}
             for m in re.finditer(rb"ids:([a-z_]+)\(", b):
                 method_calls.setdefault(m.group(1).decode(), set()).add(Path(n).name)
     fact("lua.scripts", scripts, "ROMFS_custom.zip (sizes compared against ap_romfs_embedded.h)")
@@ -152,23 +188,37 @@ def main() -> int:
             "detail": "native confirmation reporting to the GCS is a no-op in this build",
             "impact": "no native FC IDS telemetry reaches the GCS", "resolution": "implement AP_IDSGCS transport",
         })
-    if dis_facts.get("AP_IDS.update_invokes") is not None and len(dis_facts["AP_IDS.update_invokes"]) < 8:
+    driven = sorted(DETECTOR_FAMILY[c] for c in (dis_facts.get("detector_callers") or {}))
+    if dis_facts.get("detector_callers") is not None and len(driven) < 8:
         discrepancies.append({
-            "id": "DISC-003", "summary": "AP_IDS::update() only drives a subset of detectors",
-            "detail": f"invokes {dis_facts['AP_IDS.update_invokes']}; DETECTION_METHODS.md lists 8 detector families",
+            "id": "DISC-003", "summary": "Not all 8 native detector families are driven",
+            "detail": f"driven: {driven}; never called: {sorted(set(DETECTOR_FAMILY.values()) - set(driven))}",
             "impact": "FC-side states for the remaining detectors will not change on this build",
-            "resolution": "connect remaining native adapters (see VALIDATION.md 'Not yet end-to-end validated')",
+            "resolution": "wire the remaining detectors (AP_IDS::update, Copter::update_ids_offboard, GCS_MAVLINK_Copter)",
         })
-    discrepancies.append({
-        "id": "DISC-004", "summary": "PIDS state integer mapping unverified",
-        "detail": "CLEAR/SUSPECTED/CONFIRMED order is from DETECTION_METHODS.md; enum values not recoverable from stripped binary",
-        "impact": "GCS labels PIDS states 0/1/2 as CLEAR/SUSPECTED/CONFIRMED with an 'unverified mapping' flag",
-        "resolution": "confirm AP_IDS::State enum in AP_IDS.h",
-    })
+    if not enum_ok:
+        discrepancies.append({
+            "id": "DISC-004", "summary": "PIDS state integer mapping unverified",
+            "detail": "enum values are not recoverable from a stripped binary"
+                      + ("; AP_IDS.h static_asserts missing or different" if a.ap_ids_source else "; no --ap-ids-source given"),
+            "impact": "GCS labels PIDS states 0/1/2 as CLEAR/SUSPECTED/CONFIRMED with an 'unverified mapping' flag",
+            "resolution": "static_assert State::CLEAR==0, SUSPECTED==1, CONFIRMED==2 in AP_IDS.h and pass --ap-ids-source",
+        })
+    stale = sorted(n for n, v in scripts.items() if not v["embedded_size_match"])
+    if stale:
+        discrepancies.append({
+            "id": "DISC-005", "summary": "Firmware image embeds different Lua scripts than the supplied ROMFS package",
+            "detail": f"size differs from ap_romfs_embedded.h for {stale}",
+            "impact": "the scripts that run from ROMFS on this image are not the ones in firmware/scripts; an SD-card "
+                      "copy does not replace them (both run) unless SCR_DIR_DISABLE=1 skips ROMFS scripts",
+            "resolution": "rebuild the firmware with the current ROMFS package (firmware/ROMFS_custom_fixed.zip)",
+        })
 
     caps = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "inputs": {"build_zip_sha256": sha256(Path(a.build_zip).read_bytes()),
+                   "apj_sha256": sha256(apj) if apj else None,
+                   "ap_ids_source": Path(a.ap_ids_source).name if a.ap_ids_source else None,
                    "romfs_zip_sha256": sha256(Path(a.romfs_zip).read_bytes()),
                    "apj_present": apj is not None},
         "vehicle": {"board": board.group(1) if board else None, "firmware": fw_version,
@@ -180,7 +230,8 @@ def main() -> int:
             "lua_bridge_script_present": "ids_gcs_bridge.lua" in scripts,
             "lua_bridge_functional": not missing,
             "fc_telemetry_to_gcs": bool(not missing) or (dis_facts.get("AP_IDSGCS.report_confirmed_stub") is False),
-            "native_detectors_active": dis_facts.get("AP_IDS.update_invokes"),
+            "native_detectors_active": driven or None,
+            "state_map_verified": bool(enum_ok),
             "structured_custom_message": False,
             "statustext_formats_from_source": ["PIDS|1|FC|<DET>|<state>|<conf>|<evidence>|<metric>|<instance>",
                                                "PUSHPAK IDS: <CLASS> conf=<c> evidence=0x<hex>",

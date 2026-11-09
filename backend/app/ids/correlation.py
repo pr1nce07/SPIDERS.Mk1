@@ -140,7 +140,8 @@ class Correlator:
                 self._attach(inc, m, ctx, context=state_rank(m.state) < 2, notify=False)
         self._attach(inc, r, ctx, notify=False)
         if not ctx.fc_states and r.domain != "RULE":
-            inc["limitations"].append("No PUSHPAK FC/Lua telemetry received this session (see firmware discrepancy DISC-001).")
+            inc["limitations"].append("No PUSHPAK FC/Lua telemetry received this session (scripts not installed, "
+                                      "SCR_ENABLE=0, or STATUSTEXT not on this link); onboard evidence is absent, not negative.")
         if self.on_created:
             self.on_created(inc)
         return inc

@@ -21,7 +21,7 @@ A ground control station (GCS), intrusion detection system (IDS) and digital for
 │                        SPIDERS.Mk1 BACKEND (Python)                      │
 │                                                                          │
 │  Sources ─► Decoder ─► Normalizer ─► Ground IDS ─► Correlation ─► Cases  │
-│  (live/sim/   (raw kept)  (vehicle     (17 detectors  (incidents)  (SHA-256│
+│  (live/sim/   (raw kept)  (vehicle     (18 detectors  (incidents)  (SHA-256│
 │   file)                     state)      + rules)                  sealed) │
 │      │           │              │            │             │          │   │
 │      └───────────┴── Raw .tlog recorder · SQLite · Rolling buffers ──┘   │
@@ -54,7 +54,7 @@ The design has three detection tiers that deliberately stay separate:
 | Backend | Python 3.11+, FastAPI, asyncio, pymavlink, SQLAlchemy Core + SQLite (PostgreSQL-ready), NumPy/SciPy, scikit-learn (optional), orjson, PyYAML, psutil |
 | Frontend | React 19 + TypeScript, Vite, React Flow (`@xyflow/react`), ECharts, Leaflet (OpenStreetMap), TanStack Virtual, html2canvas |
 | On-board | ArduPilot Lua 5.4 scripting (PUSHPAK scripts) |
-| Testing | pytest (40 tests), Lua 5.4 via `lupa` with firmware-accurate mocks |
+| Testing | pytest (165 tests: 164 pass, 1 needs the original ROMFS package), Lua 5.4 via `lupa` with firmware-accurate mocks |
 
 ---
 
@@ -135,7 +135,7 @@ backend/app/
 
 ---
 
-## 6. Ground IDS — the 17 detectors
+## 6. Ground IDS — the 18 detectors
 
 Each detector runs inside its **own fault boundary**: if one crashes, ingestion, recording, the other detectors and the GUI keep running. Each detector reports its health (ONLINE, DEGRADED, WAITING_FOR_DATA, ERROR or DISABLED), plus its event count, errors and latency.
 
@@ -145,7 +145,7 @@ Each detector runs inside its **own fault boundary**: if one crashes, ingestion,
 | **MAVLINK_SEQUENCE** | Packet loss, duplicate (replay-like) frames, out-of-order frames | Tracked per SYSID+COMPID+link, windowed loss ratio |
 | **SOURCE_IDENTITY** | New SYSID/COMPID, untrusted control-plane sender, vehicle masquerade | Baseline learning, provenance. A new source alone is only "NEW SOURCE OBSERVED" |
 | **MAVLINK_RATE** | Message bursts, rate drops, traffic-mix change | EWMA baseline, CUSUM, entropy |
-| **MAVLINK_SIGNING** | Unsigned / invalid / downgraded signing | Signing flags; validation if a key is configured (the key is never displayed) |
+| **MAVLINK_SIGNING** | Unsigned / invalid / downgraded signing | Signing flags; validation when a key is active (keyring in Settings → Security; the key is never displayed); per-link `signing_policy` |
 | **GPS_INTEGRITY** | Spoofing, slow drift, jumps, quality mismatch | GPS↔EKF residuals, MAD robust z-score, EWMA, CUSUM, EKF variance, persistence |
 | **COMMAND** | Injected, burst, repeated or context-inconsistent commands, ACK mismatch | Weighted evidence (source / context / burst / repeat) |
 | **PARAMETER** | Sensitive change while armed, untrusted writer, bursts, drift | Original-value baseline, CUSUM |
@@ -156,8 +156,9 @@ Each detector runs inside its **own fault boundary**: if one crashes, ingestion,
 | **BATTERY** | Voltage steps without a load change, implausible readings | Step analysis |
 | **FLIGHT_MODE** | Mode flapping, uncommanded mode change, disarm in flight | Transition log |
 | **SENSOR_HEALTH** | Unhealthy sensors, EKF flags lost | SYS_STATUS bitmasks |
-| **PUSHPAK_FC** | Flight-controller (PIDS) and Lua reports, Lua script errors | STATUSTEXT adapters |
-| **ML_BASELINE** | Statistical outliers (supplementary only) | Isolation Forest per session. It never opens an incident by itself |
+| **PUSHPAK_FC** | Flight-controller (PIDS) and Lua reports, Lua script errors, bridge reboots and missed events | STATUSTEXT adapters, bridge v2 SYNC, DataFlash IDSE/IDSH/IDSF (when the firmware writes them) |
+| **BASELINE** | Parameters or mission that differ from the engineer-approved baseline, arming with mismatches | Signed manifest comparison; never re-learned |
+| **ML_BASELINE** | Statistical outliers (supplementary only) | Isolation Forest from an approved profile, or an untrusted session baseline that pauses while other detectors alarm. It never opens an incident by itself |
 
 **Analytic states:** OBSERVED, NORMAL, ANOMALOUS, SUSPECTED, CORRELATED, CONFIRMED, RESOLVED and FALSE_POSITIVE. A single anomaly is **never** turned into a confirmed attack on its own.
 
@@ -175,8 +176,8 @@ Alert(s) ─► same domain or same attacker SYSID within the time window ─►
   - a rule's INCIDENT output fires, or
   - a single HIGH-severity detection is SUSPECTED.
 - **Analytic state:**
-  - SUSPECTED, then CORRELATED once there are 2 or more detectors or sources.
-  - CONFIRMED needs confidence ≥ 0.75 **and** at least 2 independent sources (GROUND, FC or LUA) or at least 3 detectors.
+  - SUSPECTED, then CORRELATED once there are 2 or more detectors or independent evidence lines.
+  - CONFIRMED needs confidence ≥ 0.75 **and** at least 2 independent evidence lines. Results that depend on the same sensor or data path (for example ground, FC and Lua GPS checks that all use the GPS/EKF residual) form one line; repeats count at × 0.35 (`ids.corroboration_weight`). See `backend/app/ids/lineage.py`.
 - **Confidence is explainable:** it's a list of contributors, e.g. "+35 parameter anomaly · GROUND". It's never an opaque score, and **severity is separate from confidence**.
 - **Explanation panel** on every alert and incident: WHAT, WHY, WHEN, SOURCE, EVIDENCE, RULE, CONFIDENCE and LIMITATIONS.
 - **Workflow:** OPEN, ACKNOWLEDGED, INVESTIGATING, RESOLVED and FALSE_POSITIVE. Evidence is **never deleted**, even when an alert is marked a false positive.
@@ -213,10 +214,10 @@ Operators build detection logic **without code**. Rules are JSON *data*; there i
 | **Raw recorder** | Every frame of every session is written to `.tlog` (8-byte timestamp + exact wire bytes). If disk space runs low, recording stops and the loss is logged explicitly. |
 | **Rolling buffers** | 5 minutes of packets, results, state and timeline; bounded and rotation-counted |
 | **Automatic snapshot** | On HIGH/CRITICAL or CONFIRMED incidents, or on manual request: **30 s before + incident + 60 s after** (configurable) |
-| **Case directory** | `manifest.json`, `incident.json`, `timeline.jsonl`, `mavlink_raw.bin`, `mavlink_decoded.jsonl`, `telemetry.jsonl`, `ids_events.jsonl`, `gps_track.csv`, `attitude.csv`, `battery.csv`, `commands.jsonl`, `parameters.jsonl`, `rules/`, `screenshots/`, `hashes.sha256`, `README.txt` |
+| **Case directory** | `manifest.json`, `incident.json`, `timeline.jsonl`, `mavlink_raw.bin`, `mavlink_decoded.jsonl`, `telemetry.jsonl`, `ids_events.jsonl`, `gps_track.csv`, `attitude.csv`, `battery.csv`, `commands.jsonl`, `parameters.jsonl`, `rules/`, `screenshots/`, `hashes.sha256`, `case.sig.json` (Ed25519), `README.txt` |
 | **Manifest** | Vehicle, firmware and git commit, trigger, capture window, evidence counts, rule versions, config snapshot, and every artifact's size, SHA-256, time and source |
-| **VERIFY CASE** | Returns VALID, MODIFIED, MISSING or UNVERIFIABLE per file. `hashes.sha256` is compatible with `sha256sum -c` |
-| **Append-only additions** | Screenshots (html2canvas) can only be added to a VALID case, and each addition is recorded as a manifest revision |
+| **VERIFY CASE** | Returns VALID, MODIFIED, MISSING or UNVERIFIABLE per file, plus the signature status (VALID, UNSIGNED, CONTENT_CHANGED, INVALID_SIGNATURE, UNTRUSTED_KEY). `hashes.sha256` is compatible with `sha256sum -c` (cases sealed on Windows before 9 Nov 2026 have `\r\n` lines) |
+| **Append-only additions** | Screenshots (html2canvas) and custody events can only be added to a VALID case; each addition is a signed manifest revision |
 | **Export** | Case ZIP; re-importable and re-verifiable |
 | **Evidence graph** | Clickable graph: incident ↔ detector results ↔ MAVLink messages ↔ rules ↔ Lua/FC ↔ attacker ↔ snapshot |
 
@@ -247,15 +248,10 @@ Each script reports **both** ways:
 
 Long texts are chunked; the GCS reassembles them.
 
-**Firmware findings (from build-artifact discovery):**
-- **DISC-001:** the original scripts called binding methods that don't exist.
-- **DISC-002:** native GCS reporting is a stub.
-- **DISC-003:** only 3 of 8 native detectors are driven.
-- **DISC-004:** the PIDS state mapping is unverified.
-- The firmware has no `dofile`, so helpers must be loaded with `require()` from `scripts/modules/`.
-- `gyros_consistent()` needs an integer argument.
-
-All of these are fixed in the provided scripts.
+**Firmware findings (from build-artifact discovery, `configs/capabilities.json`):**
+- **DISC-001–004 are resolved.** They described the 26 Sep 2026 build: a 2-method binding the original scripts didn't match, a stub `AP_IDSGCS::report_confirmed`, only 3 of 8 native detectors driven, and an unverified state map. build_v3 (APJ `223c26f8…`) has a 26-method binding, implements `report_confirmed`, drives all 8 detectors, and pins the state enum with `static_assert`s. The current scripts use only the two methods every build has.
+- **DISC-005 is open:** build_v3's ROMFS embeds older copies of 6 of the current scripts. See `firmware/BUILD_AND_LINKING.md`.
+- Script fixes that apply to every build: the firmware has no `dofile`, so helpers are loaded with `require()` from `scripts/modules/`; `gyros_consistent()` needs an integer argument.
 
 **Install:** copy `scripts/` (including `modules/`) to `APM/scripts/` on the SD card, then set `SCR_ENABLE=1` and `SCR_DIR_DISABLE=1` (to skip the broken scripts embedded in ROMFS).
 
@@ -263,10 +259,13 @@ All of these are fixed in the provided scripts.
 
 ## 11. Source-of-truth discovery
 
-`scripts/discover_firmware.py` inspects `build.zip` + `ROMFS_custom.zip` (including disassembling the ELF) and writes **`configs/capabilities.json`**:
+`scripts/discover_firmware.py` inspects a build zip + a ROMFS package (including disassembling the ELF) and, with `--ap-ids-source`, the AP_IDS headers. It writes **`configs/capabilities.json`** (currently generated from build_v3, APJ `223c26f8…`):
 
-- firmware version, git commit, board, flash size
+- firmware version, git commit, board, flash size, APJ SHA-256
 - compiled AP_IDS objects and Lua binding methods
+- which native detectors are driven, from every call site of `<Detector>::update/observe` in the ELF
+- whether `AP_IDSGCS::report_confirmed` is a stub
+- the PIDS state enum, verified from `static_assert`s in `AP_IDS.h`
 - custom MAVLink messages (none), DataFlash IDS messages (none)
 - embedded ROMFS scripts vs supplied scripts
 - recorded discrepancies
@@ -410,7 +409,7 @@ Tests: `cd backend && PYTHONPATH=. ../.venv/bin/python -m pytest -q`
 - **ArduPilot only.** PX4 and multi-vehicle fleets aren't supported yet.
 - **No RF-layer sensing.** Jamming is inferred from link behaviour only.
 - **No firmware or bootloader integrity detection.**
-- **Firmware-side gaps** that need a rebuild: native FC→GCS reporting is a stub, and only 3 of 8 native detectors are driven.
+- **Firmware-side gaps** that need firmware work: no native DataFlash IDS records, no passive PARAM_SET or setpoint hooks, an 8-slot RAM-only event ring, and build_v3 embedding older ROMFS scripts (DISC-005). See `firmware/FIRMWARE_WORK_REQUIRED.md`.
 - **Lua visibility is limited** by the available bindings: it can't see packet source, RSSI or the command stream.
 - **Link latency is N/A,** because measuring it would require transmitting (TIMESYNC).
 - **No reverse replay:** seek re-analyses the recording from the start instead.

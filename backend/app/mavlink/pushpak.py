@@ -11,11 +11,9 @@ ap_romfs_embedded.h):
 * ArduPilot scripting reports runtime errors as STATUSTEXT beginning "Lua:" /
   "Scripting:" — used here for Lua-layer health.
 
-Firmware finding (see configs/capabilities.json): the compiled `ids` Lua binding
-exposes only `report_confirmed()` and `event_sequence()`. The accessor methods
-the scripts call (e.g. `ids:gps_confidence()`) are absent, so on this build the
-scripts are expected to stop with a Lua runtime error rather than emit the
-formats above. The parsers are defensive and keep the original text either way.
+Firmware facts come from configs/capabilities.json (regenerated from the build
+by scripts/discover_firmware.py), not from this file. The parsers are defensive
+and keep the original text either way.
 """
 from __future__ import annotations
 
@@ -24,9 +22,9 @@ from typing import Optional
 
 PIDS_DETECTORS = ["GPS", "MAVLINK", "COMMAND", "RC_LINK", "IMU", "MISSION", "PARAMETER", "OFFBOARD"]
 
-# Integer state → name. The bridge forwards ids:<det>_state() integers. The enum
-# ordering CLEAR/SUSPECTED/CONFIRMED comes from DETECTION_METHODS.md; the numeric
-# values are not provable from the stripped binary and are flagged as such.
+# Integer state → name. The values cannot be recovered from a stripped binary; the
+# runtime sets PIDS_STATE_MAP_VERIFIED from capabilities.json, which verifies them
+# from the AP_IDS.h static_asserts (build_v3: CLEAR=0, SUSPECTED=1, CONFIRMED=2).
 PIDS_STATE_MAP = {0: "CLEAR", 1: "SUSPECTED", 2: "CONFIRMED"}
 PIDS_STATE_MAP_VERIFIED = False
 

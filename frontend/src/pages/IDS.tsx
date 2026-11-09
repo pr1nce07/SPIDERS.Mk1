@@ -18,7 +18,7 @@ export function Comparison() {
     <div className="col">
       {!c.fc_available && (
         <div className="notice warn small">
-          <strong>FC IDS / LUA columns show N/A because no PUSHPAK telemetry has been received.</strong> {c.firmware_note ? `Firmware finding: ${c.firmware_note} (DISC-001).` : ""} Only actual values are displayed.
+          <strong>FC IDS / LUA columns show N/A because no PUSHPAK telemetry has been received.</strong> {c.firmware_note ? `Firmware finding: ${c.firmware_note}.` : ""} Only actual values are displayed.
         </div>
       )}
       <div className="scroll">

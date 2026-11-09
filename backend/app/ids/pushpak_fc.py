@@ -22,13 +22,13 @@ class PushpakFCDetector(Detector):
     detector_id = "PUSHPAK_FC"
     name = "PUSHPAK FC / Lua"
     domain = "PUSHPAK"
-    # STATUSTEXT live; DF_PIDS/PIDH/PIDF from imported DataFlash logs once the firmware writes them (FW-03)
-    data_sources = ("STATUSTEXT", "DF_PIDS", "DF_PIDH", "DF_PIDF")
+    # STATUSTEXT live; DataFlash IDSE/IDSH/IDSF records from imported logs once the firmware writes them (FW-03)
+    data_sources = ("STATUSTEXT", "DF_IDSE", "DF_IDSH", "DF_IDSF")
     methods = ("PIDS STATUSTEXT adapter", "Lua confirmation adapter", "Lua runtime-error health")
     description = "Normalises FC (PIDS) and Lua confirmation STATUSTEXT into detector states; tracks Lua script health."
-    limitations = ("On the supplied firmware build the Lua `ids` binding lacks the accessor methods the scripts call "
-                   "(see capabilities DISC-001); FC/Lua states will be N/A unless the firmware is corrected.",
-                   "PIDS state integer mapping (0/1/2 → CLEAR/SUSPECTED/CONFIRMED) is from documentation, not verified in firmware.")
+    limitations = ("FC/Lua states are N/A until the vehicle sends PUSHPAK STATUSTEXT: the Lua scripts must be installed "
+                   "(SCR_ENABLE=1) and the telemetry link must carry STATUSTEXT.",
+                   "A PIDS state is flagged unverified unless configs/capabilities.json verifies the AP_IDS state enum.")
 
     def __init__(self, cfg):
         super().__init__(cfg)
@@ -44,7 +44,7 @@ class PushpakFCDetector(Detector):
     def process(self, ev: TelemetryEvent, ctx: AnalysisContext):
         if ev.sysid != ctx.vehicle_sysid:
             return []
-        if ev.msg_name.startswith("DF_PID"):
+        if ev.msg_name in ("DF_IDSE", "DF_IDSH", "DF_IDSF"):
             return self._dataflash(ev, ctx)
         key = (ev.sysid, ev.compid, ev.fields.get("id") or 0)
         self.chunk_idx.setdefault(key, []).append(ev.idx)
@@ -154,7 +154,7 @@ class PushpakFCDetector(Detector):
         """Onboard AP_IDS DataFlash records (firmware FW-03): same meaning as the PIDS STATUSTEXT, but durable."""
         f = ev.fields
         self.mark_data(ctx)
-        if ev.msg_name == "DF_PIDS":
+        if ev.msg_name == "DF_IDSE":
             det_i = int(f.get("Det", -1))
             det = PIDS_DETECTORS[det_i] if 0 <= det_i < len(PIDS_DETECTORS) else f"UNKNOWN({det_i})"
             text = (f"PIDS|2|FC|{det}|{int(f.get('St', 0))}|{float(f.get('Conf', 0)):.3f}|{int(f.get('Ev', 0))}|"
@@ -164,21 +164,21 @@ class PushpakFCDetector(Detector):
             try:
                 return self.process(ev, ctx)
             finally:
-                ev.msg_name = "DF_PIDS"
+                ev.msg_name = "DF_IDSE"
                 ev.fields = f
-        if ev.msg_name == "DF_PIDH":
+        if ev.msg_name == "DF_IDSH":
             out = []
             q, lg = int(f.get("QDrop", 0)), int(f.get("LogDrop", 0))
             last = getattr(self, "_pidh", {"QDrop": 0, "LogDrop": 0})
             if q > last["QDrop"] or lg > last["LogDrop"]:
                 out.append(self.result(ctx, "OBSERVED", f"AP_IDS event loss on board: ring dropped {q}, log dropped {lg}", kind="health",
-                                       severity="MEDIUM", ev=ev, source="FC", domain="PUSHPAK", method="DataFlash PIDH counters",
+                                       severity="MEDIUM", ev=ev, source="FC", domain="PUSHPAK", method="DataFlash IDSH counters",
                                        inputs=dict(f), why="The native IDS reports events it could not queue or log; they are lost, not hidden."))
             self._pidh = {"QDrop": q, "LogDrop": lg}
             self.delivery.ring_dropped = max(self.delivery.ring_dropped, q)
             return out
         return [self.result(ctx, "OBSERVED", f"AP_IDS fault code {f.get('Code')} (subsystem {f.get('Sub')})", kind="health",
-                            severity="MEDIUM", ev=ev, source="FC", domain="PUSHPAK", method="DataFlash PIDF fault record",
+                            severity="MEDIUM", ev=ev, source="FC", domain="PUSHPAK", method="DataFlash IDSF fault record",
                             inputs=dict(f), why="The native IDS recorded an internal fault and its recovery state.")]
 
     def _delivery(self, rec: dict, ctx, ev, refs) -> list:
@@ -201,7 +201,7 @@ class PushpakFCDetector(Detector):
                 out.append(self.result(ctx, "OBSERVED", f"AP_IDS event ring overflow: {r['new_ring_drops']} event(s) dropped on board",
                                        kind="health", severity="MEDIUM", ev=ev, refs=refs, source="LUA", domain="PUSHPAK",
                                        method="bridge SYNC drop counter", inputs=d.status(),
-                                       why="The native IDS overwrote events before they were reported; check DataFlash PIDS records."))
+                                       why="The native IDS overwrote events before they were reported; check DataFlash IDSE records."))
             if r["reboot"]:
                 out.append(self.result(ctx, "OBSERVED", "Flight controller reboot detected (bridge uptime reset)", kind="observation",
                                        severity="HIGH" if ctx.airborne else "MEDIUM", ev=ev, refs=refs, source="LUA",

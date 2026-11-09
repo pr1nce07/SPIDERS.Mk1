@@ -145,7 +145,7 @@ def iter_dataflash(path: Path) -> Iterator[SourceItem]:
             if ev_id in (10, 11):
                 armed = ev_id == 10
             mapped = ("DF_EV", {"event_id": ev_id, "armed": armed if ev_id in (10, 11) else None})
-        elif typ == "PIDW":
+        elif typ == "IDSW":
             # Onboard PARAM_SET receive hook (firmware FW-04): sender identity as seen by the autopilot.
             name = d.get("Name")
             name = name.decode(errors="ignore") if isinstance(name, (bytes, bytearray)) else name

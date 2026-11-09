@@ -175,7 +175,10 @@ class Runtime:
         p = self.root / "configs" / "capabilities.json"
         if p.exists():
             try:
-                return json.loads(p.read_text())
+                caps = json.loads(p.read_text())
+                from ..mavlink import pushpak
+                pushpak.PIDS_STATE_MAP_VERIFIED = bool((caps.get("pushpak") or {}).get("state_map_verified"))
+                return caps
             except Exception as exc:
                 self.errors.record("DISCOVERY", "CAPABILITIES_INVALID", str(exc))
         return {"vehicle": {}, "pushpak": {}, "mavlink": {"version": "2", "custom_dialect": False}, "findings": [],
@@ -624,7 +627,7 @@ class Runtime:
                 "event_delivery": pk.delivery.status() if pk is not None and hasattr(pk, "delivery") else None,
                 "jamming": "JAMMING is not a PIDS detector in the supplied source; jamming_confirm.lua classifies RC_LINK evidence (shown under RC_LINK).",
                 "fc_available": bool(pk and pk.fc), "lua_available": bool(pk and pk.lua),
-                "firmware_note": next((d["summary"] for d in self.capabilities.get("discrepancies", []) if d["id"] == "DISC-001"), None)}
+                "firmware_note": next((f"{d['summary']} ({d['id']})" for d in self.capabilities.get("discrepancies", [])), None)}
 
     # ---------------------------------------------------------------- health
     def health(self) -> dict:

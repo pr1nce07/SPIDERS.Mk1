@@ -26,10 +26,10 @@ def test_pids_v2_statustext_carries_boot_and_sequence():
     assert parse_statustext("PIDS|1|FC|GPS|2|0.910|24|12.50|0")["boot_id"] is None   # v1 still parses
 
 
-def test_dataflash_pids_record_becomes_fc_result_and_dedupes_with_live_line():
+def test_dataflash_idse_record_becomes_fc_result_and_dedupes_with_live_line():
     det = PushpakFCDetector({})
     df = {"TimeUS": 1, "Boot": 77, "Seq": 5, "Det": 0, "St": 2, "Ev": 24, "Conf": 0.91, "Met": 12.5, "Inst": 0}
-    out = det.process(_ev("DF_PIDS", df, "DATAFLASH"), _ctx())
+    out = det.process(_ev("DF_IDSE", df, "DATAFLASH"), _ctx())
     assert out and out[0].source == "FC" and out[0].inputs["detector"] == "GPS" and out[0].state == "CONFIRMED"
     again = det.process(_ev("STATUSTEXT", {"text": "PIDS|2|FC|GPS|2|0.910|24|12.50|0|77|5"}), _ctx())
     assert again == [] and det.delivery.native_duplicates == 1
@@ -37,10 +37,10 @@ def test_dataflash_pids_record_becomes_fc_result_and_dedupes_with_live_line():
 
 def test_dataflash_loss_counters_and_faults_are_visible():
     det = PushpakFCDetector({})
-    out = det.process(_ev("DF_PIDH", {"TimeUS": 1, "Boot": 77, "Health": 255, "Scr": 0, "QOcc": 8, "QDrop": 3, "LogDrop": 0, "Age": 40},
+    out = det.process(_ev("DF_IDSH", {"TimeUS": 1, "Boot": 77, "Health": 255, "Scr": 0, "QOcc": 8, "QDrop": 3, "LogDrop": 0, "Age": 40},
                           "DATAFLASH"), _ctx())
     assert out and "ring dropped 3" in out[0].title
-    out = det.process(_ev("DF_PIDF", {"TimeUS": 2, "Boot": 77, "Code": 4, "Sub": 1, "Rec": 1}, "DATAFLASH"), _ctx())
+    out = det.process(_ev("DF_IDSF", {"TimeUS": 2, "Boot": 77, "Code": 4, "Sub": 1, "Rec": 1}, "DATAFLASH"), _ctx())
     assert out and out[0].kind == "health"
 
 
@@ -53,11 +53,11 @@ def test_sync_with_native_boot_id_and_drop_counter():
     assert r["reboot"]          # boot ID changed even though uptime did not go backwards
 
 
-def test_dataflash_pidw_maps_to_param_set_with_real_sender(tmp_path):
-    log = tmp_path / "pidw.log"
+def test_dataflash_idsw_maps_to_param_set_with_real_sender(tmp_path):
+    log = tmp_path / "idsw.log"
     log.write_text("FMT, 128, 89, FMT, BBnNZ, Type,Length,Name,Format,Columns\n"
-                   "FMT, 200, 40, PIDW, QIBBBBNfBB, TimeUS,Boot,Sys,Comp,Chan,Sig,Name,Val,Typ,Res\n"
-                   "PIDW, 1000000, 7, 42, 190, 1, 0, FENCE_ENABLE, 0, 9, 2\n")
+                   "FMT, 200, 40, IDSW, QIBBBBNfBB, TimeUS,Boot,Sys,Comp,Chan,Sig,Name,Val,Typ,Res\n"
+                   "IDSW, 1000000, 7, 42, 190, 1, 0, FENCE_ENABLE, 0, 9, 2\n")
     items = [i for i in open_source(log) if i.data.get("msg_name") == "PARAM_SET"]
     assert len(items) == 1
     d = items[0].data

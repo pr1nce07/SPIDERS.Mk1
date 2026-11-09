@@ -14,7 +14,8 @@ Closes the GCS side of *SPIDERS_Mk1_Gap_Analysis_and_Implementation_Blueprint.md
 | GAP-02 | `scripts/evaluate_detectors.py` + `app/evaluation.py`: per-class/per-detector/per-run metrics, Wilson and Poisson intervals, locked-partition guard; dataset card template. | `test_evaluation.py` |
 | GAP-14 | `scripts/make_release_manifest.py`: signed manifest, CycloneDX SBOM, ROMFS drift check, `--verify`. | `test_release.py` |
 | GAP-15 | `models/observation.py` canonical `SecurityObservation` (ArduPilot/MAVLink adapter only). | `test_observation.py` |
-| Firmware contract | GCS parses DataFlash `PIDS/PIDH/PIDF/PIDW`, PIDS v2 STATUSTEXT and SYNC `boot=`/`drop=` ahead of the firmware. | `test_firmware_contract.py` |
+| Firmware contract | GCS parses DataFlash `IDSE/IDSH/IDSF/IDSW` (not `PID*`: ArduPilot already logs `PIDS`), PIDS v2 STATUSTEXT and SYNC `boot=`/`drop=` ahead of the firmware. | `test_firmware_contract.py` |
+| Firmware facts | `discover_firmware.py` now finds detector wiring from every call site in the ELF, verifies the state enum from `AP_IDS.h` (`--ap-ids-source`) and flags ROMFS script drift (DISC-005). `configs/capabilities.json` regenerated from build_v3 (APJ `223c26f8…`): DISC-001–004 resolved, DISC-005 open. README and docs corrected. | — |
 
 UI: Settings → Security (keys, audit checkpoints, approved baseline); case view shows signature status and chain of custody; incident explanations show independent evidence lines; IDS page shows FC event delivery.
 

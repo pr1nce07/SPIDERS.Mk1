@@ -156,8 +156,9 @@ def build_manifest(root: Path, version: str, apj: Optional[Path] = None, elf: Op
     for d in caps.get("discrepancies", []) or []:
         findings.append({"id": f"CAP-{d.get('id', 'DISC')}", "severity": "INFO", "text": str(d.get("summary") or d)[:300]})
     findings.append({"id": "REL-DOC-BASELINE", "severity": "WARNING",
-                     "text": "firmware/BUILD_AND_LINKING.md and configs/capabilities.json describe the 2-method `ids` binding build; "
-                             "the external technical reference describes build_v3 (26 methods). Treat this manifest's hashes as authoritative."})
+                     "text": "Three PUSHPAK firmware builds exist (26 Sep 2026, build_v3 APJ 223c26f8, 14 Oct 2026 APJ 3fab3632). "
+                             "configs/capabilities.json describes build_v3; which one is the release is not fixed until the APJ/ELF "
+                             "are supplied here. Treat this manifest's hashes as authoritative."})
     git = _git(root)
     if git is None:
         findings.append({"id": "REL-NO-VCS", "severity": "WARNING",

@@ -1,13 +1,15 @@
 -- PUSHPAK UAV IDS common Lua helpers
 -- Read / analyze / classify / report only. No flight-control operations.
 --
--- Binding contract (verified against the Pixhawk6C ArduCopter V4.7.1 dbe79216
--- build): the `ids` singleton exposes ONLY
+-- Binding contract: these scripts call only the two `ids` methods that every
+-- PUSHPAK build provides:
 --     ids:report_confirmed(name, state, confidence, evidence, metric, instance, sequence) -> bool
 --     ids:event_sequence() -> uint32
--- There are no per-detector accessors (gps_confidence(), gps_state(), ...), so
--- every confirmation script derives its own evidence from standard ArduPilot
--- bindings and pushes its result back through report_confirmed().
+-- build_v3 (APJ 223c26f8...) also exposes per-detector accessors
+-- (gps_confidence(), gps_state(), ...); the 26 Sep 2026 build did not. The
+-- scripts deliberately do not use them, so they run on every build: each
+-- confirmation script derives its own evidence from standard ArduPilot bindings
+-- and pushes its result back through report_confirmed().
 
 local M = {}
 
