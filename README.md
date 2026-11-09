@@ -35,6 +35,8 @@ Push-Location backend
 # Terminal 2
 Push-Location frontend
 npm run dev  # open the URL printed by Vite
+# Terminal 2 (if disc is partitioned)
+npm.cmd run dev # open the URL printed by Vite
 ```
 
 ### macOS / Linux
