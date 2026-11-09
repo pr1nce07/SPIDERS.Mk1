@@ -37,7 +37,7 @@ export interface ComparisonRow {
   ground: { state: string; detector: string | null; all: Record<string, string | null> };
   correlated: string | null;
 }
-export interface Comparison { rows: ComparisonRow[]; lua_health: Record<string, any>; jamming: string; fc_available: boolean; lua_available: boolean; firmware_note: string | null }
+export interface Comparison { rows: ComparisonRow[]; lua_health: Record<string, any>; event_delivery?: Record<string, any> | null; jamming: string; fc_available: boolean; lua_available: boolean; firmware_note: string | null }
 export interface IdsSnapshot { detectors: DetectorHealth[]; comparison: Comparison; rules?: { rule_id: string; version: number; evaluations: number; triggers: number; errors: number }[] }
 
 export interface Alert {
@@ -62,6 +62,7 @@ export interface Incident {
 export interface Explanation {
   what: string; why: string; when: string; source: string; evidence: string[]; rule: string; confidence: string;
   contributors: any[]; limitations: string[]; state_policy?: string;
+  independence?: { lines: string[][]; count: number; policy: string } | null;
 }
 export interface TraceRow { node_id: string; type: string; category: string; label: string; value: any; inputs: Record<string, any>; detail: string }
 export interface DetectorResult {

@@ -381,9 +381,13 @@ class SigningDetector(Detector):
     limitations = ("Without the secret key the GCS can observe that frames are signed but cannot validate them.",
                    "Signing provides authentication metadata only, not confidentiality.")
 
-    def __init__(self, cfg, expected: bool = False, key_configured: bool = False):
+    def __init__(self, cfg, expected: bool = False, key_configured: bool = False, policy: dict | None = None):
         super().__init__(cfg)
-        self.expected = expected
+        # Per-link policy (GAP-08): off | optional | required. `signing_expected: true` means default "required".
+        policy = dict(policy or {})
+        self.policy_default = str(policy.get("default") or ("required" if expected else "optional")).lower()
+        self.policy_links = {str(k): str(v).lower() for k, v in (policy.get("links") or {}).items()}
+        self.expected = self.policy_default == "required"
         self.key_configured = key_configured
         self.src: dict[tuple, dict] = {}
         self.cool: dict = {}
@@ -391,10 +395,15 @@ class SigningDetector(Detector):
     def accepts(self, ev):
         return ev.sysid is not None
 
+    def link_policy(self, link) -> str:
+        return self.policy_links.get(str(link), self.policy_default)
+
     def process(self, ev: TelemetryEvent, ctx):
         self.mark_data(ctx)
         key = (ev.sysid, ev.compid)
         s = self.src.setdefault(key, {"signed": 0, "unsigned": 0, "invalid": 0, "was_signed": False})
+        s["authorized_source"] = ev.sysid == ctx.vehicle_sysid or ctx.is_trusted_gcs(ev.sysid)
+        s["link"] = ev.link
         out = []
         if ev.msg_name == "BAD_DATA":
             if ev.signature_status == "INVALID":
@@ -419,10 +428,12 @@ class SigningDetector(Detector):
                                        inputs={"sysid": ev.sysid, "compid": ev.compid, "msg": ev.msg_name,
                                                "signed_before": s["signed"]},
                                        why="This source previously signed its frames and has now sent an unsigned frame."))
-            elif self.expected and (ev.sysid == ctx.vehicle_sysid or ctx.is_trusted_gcs(ev.sysid)) and self._cool(("uns", key), ctx, 60):
+            elif self.link_policy(ev.link) == "required" and (ev.sysid == ctx.vehicle_sysid or ctx.is_trusted_gcs(ev.sysid))                     and self._cool(("uns", key), ctx, 60):
                 out.append(self.result(ctx, "ANOMALOUS", "Unsigned traffic while signing is expected", ev=ev,
-                                       method="signature flag tracking", inputs={"sysid": ev.sysid, "compid": ev.compid, "msg": ev.msg_name},
-                                       why="Configuration says signing is expected, but this frame is unsigned."))
+                                       method="signature flag tracking",
+                                       inputs={"sysid": ev.sysid, "compid": ev.compid, "msg": ev.msg_name, "link": ev.link,
+                                               "link_policy": "required"},
+                                       why=f"The signing policy for link {ev.link} is 'required', but this frame is unsigned."))
         return out
 
     def state_for(self, key) -> str:
@@ -437,12 +448,23 @@ class SigningDetector(Detector):
             return "SIGNING EXPECTED"
         return "UNSIGNED" if s["unsigned"] else "SIGNING UNKNOWN"
 
+    def facts(self, key) -> dict:
+        """The four separate facts (GAP-08): a signed bit is not a verified signature, and neither is authorization."""
+        s = self.src.get(key) or {}
+        return {"signature_present": bool(s.get("signed")),
+                "signature_verified": bool(s.get("signed")) and self.key_configured and not s.get("invalid"),
+                "signature_invalid_seen": bool(s.get("invalid")),
+                "source_authorized": s.get("authorized_source"),
+                "contextually_expected": "assessed per message by the COMMAND/PARAMETER/MISSION/OFFBOARD detectors",
+                "link_policy": self.link_policy(s.get("link"))}
+
     def table(self) -> list[dict]:
-        return [{"sysid": k[0], "compid": k[1], **{kk: vv for kk, vv in v.items()}, "state": self.state_for(k)}
-                for k, v in self.src.items()]
+        return [{"sysid": k[0], "compid": k[1], **{kk: vv for kk, vv in v.items()}, "state": self.state_for(k),
+                 "facts": self.facts(k)} for k, v in self.src.items()]
 
     def tick(self, ctx):
         self.metrics = {"expected": self.expected, "key_configured": self.key_configured,
+                        "policy": {"default": self.policy_default, "links": self.policy_links},
                         "states": Counter(self.state_for(k) for k in self.src)}
         return []
 

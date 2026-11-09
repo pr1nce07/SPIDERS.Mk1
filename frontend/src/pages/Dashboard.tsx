@@ -101,7 +101,7 @@ export default function Dashboard() {
   const shortcuts = [
     { id: "ids", title: "Detection center", sub: "Rules, health & anomaly signals", icon: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z|M9 12l2 2 4-4" },
     { id: "packets", title: "Packet explorer", sub: "Inspect MAVLink packet streams", icon: "M4 6h16|M4 12h16|M4 18h10" },
-    { id: "forensics", title: "Forensic workspace", sub: "Investigate evidence & cases", icon: "M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14z|M20 20l-4-4" },
+    { id: "silktrace", title: "SILKTRACE", sub: "Native cases & universal drone forensics", icon: "M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14z|M20 20l-4-4" },
   ];
   return (
     <div className="overview">

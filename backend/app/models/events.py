@@ -116,6 +116,7 @@ class DetectorResult:
     trace: Optional[list[dict]] = None
     kind: str = "alert"                      # alert | observation | recovery | health
     actions: dict[str, Any] = field(default_factory=dict)  # e.g. {"snapshot": True, "incident": True}
+    lineage: Optional[list[str]] = None      # evidence groups (GAP-09); None = derived from the detector default
     result_id: str = field(default_factory=lambda: f"R-{uuid.uuid4().hex[:12]}")
 
     def to_dict(self) -> dict:
@@ -128,7 +129,7 @@ class DetectorResult:
             "rule_id": self.rule_id, "rule_version": self.rule_version,
             "detector_version": self.detector_version, "packet_refs": self.packet_refs[-50:],
             "sysid": self.sysid, "compid": self.compid, "explanation": self.explanation,
-            "trace": self.trace, "kind": self.kind, "actions": self.actions,
+            "trace": self.trace, "kind": self.kind, "actions": self.actions, "lineage": self.lineage,
         }
 
 

@@ -14,6 +14,7 @@ from typing import Callable, Optional
 
 from ..config import SEVERITIES, severity_rank
 from ..models.events import DetectorResult, iso_from_epoch, state_rank
+from .lineage import evidence_lines, lineage_for
 
 DOMAIN_TITLES = {
     "GPS_INTEGRITY": "GPS integrity incident", "MAVLINK_SECURITY": "Correlated MAVLink security incident",
@@ -48,6 +49,8 @@ class Correlator:
         self.min_det = int(config.get("ids.min_correlated_detectors", 2))
         self.susp_thr = float(config.get("ids.suspected_threshold", 0.45))
         self.conf_thr = float(config.get("ids.confirmed_threshold", 0.75))
+        # Weight of a contributor that re-derives evidence already counted on the same line (GAP-09).
+        self.corroboration_w = float(config.get("ids.corroboration_weight", 0.35))
         self.alloc = allocator
         self.session_id = session_id
         self.on_created = on_created
@@ -171,6 +174,32 @@ class Correlator:
             self.on_updated(inc)
 
     def _confidence(self, results: list[DetectorResult]) -> tuple[float, list[dict]]:
+        contributors = self._independence(self._raw_contributors(results))
+        return min(0.99, sum(c["value"] for c in contributors)), contributors
+
+    def _independence(self, contributors: list[dict]) -> list[dict]:
+        """Discount contributors that share an evidence line with a stronger one (GAP-09)."""
+        out = sorted((dict(c) for c in contributors), key=lambda c: -c["raw_value"])
+        lines = evidence_lines(tuple(c["lineage"]) if c["lineage"] else None for c in out)
+        claimed: set[int] = set()
+        for c in out:
+            c["value"] = c["raw_value"]
+            if not c["lineage"]:
+                c["line"], c["independent"] = None, False
+                continue
+            li = next(i for i, ln in enumerate(lines) if set(c["lineage"]) <= ln)
+            c["line"] = li
+            if li in claimed:
+                c["value"] = round(c["raw_value"] * self.corroboration_w, 3)
+                c["independent"] = False
+                c["basis"] = c["basis_raw"] + f"; corroborates line {li + 1} (shares {'/'.join(sorted(lines[li]))}) × {self.corroboration_w}"
+            else:
+                claimed.add(li)
+                c["independent"] = True
+                c["basis"] = c["basis_raw"]
+        return out
+
+    def _raw_contributors(self, results: list[DetectorResult]) -> list[dict]:
         best: dict[tuple, DetectorResult] = {}
         for m in results:
             if state_rank(m.state) < 2:
@@ -192,30 +221,42 @@ class Correlator:
                 basis = f"{src} {det} state {m.state} (no confidence reported; state-based weight)"
             if det == "ML_BASELINE":
                 v *= 0.3
-            contributors.append({"label": f"{m.title}", "detector": det, "source": src, "value": round(v, 3), "basis": basis})
-        contributors.sort(key=lambda c: -c["value"])
-        total = min(0.99, sum(c["value"] for c in contributors))
-        return total, contributors
+            lin = lineage_for(m)
+            # Key on the onboard family too, so FC GPS and FC MISSION stay separate contributors.
+            fam = (m.inputs or {}).get("detector") if det == "PUSHPAK_FC" else None
+            contributors.append({"label": f"{m.title}", "detector": det, "family": fam, "source": src,
+                                 "raw_value": round(v, 3), "value": round(v, 3), "basis_raw": basis, "basis": basis,
+                                 "lineage": list(lin) if lin else None})
+        return contributors
+
+    @staticmethod
+    def _ckey(c: dict) -> str:
+        return f"{c['detector']}|{c.get('family') or ''}|{c['source']}"
 
     def _rescore(self, inc) -> None:
         members = [m for _, m, _ in self.recent if m.result_id in inc["_members"]]
-        conf, contributors = self._confidence(members)
+        raw = self._raw_contributors(members)
         # keep contributors from members that already rotated out of `recent`
-        old = {c["detector"] + c["source"]: c for c in inc["contributors"]}
-        for c in contributors:
-            key = c["detector"] + c["source"]
-            if key not in old or c["value"] >= old[key]["value"]:
+        old = {self._ckey(c): c for c in inc["contributors"]}
+        for c in raw:
+            key = self._ckey(c)
+            if key not in old or c["raw_value"] >= old[key]["raw_value"]:
                 old[key] = c
-        inc["contributors"] = sorted(old.values(), key=lambda c: -c["value"])
+        inc["contributors"] = sorted(self._independence(list(old.values())), key=lambda c: -c["value"])
         inc["confidence"] = round(min(0.99, sum(c["value"] for c in inc["contributors"])), 3)
-        indep = {s for s in inc["sources"] if s in ("GROUND", "FC", "LUA")}
-        if any(s.startswith("RULE:") for s in inc["detectors"]):
-            indep.add("GROUND")
+        lines = evidence_lines(tuple(c["lineage"]) if c["lineage"] else None for c in inc["contributors"])
+        inc["independence"] = {"lines": [sorted(ln) for ln in lines], "count": len(lines),
+                               "policy": "Evidence sharing a sensor/data path is one line; CONFIRMED needs ≥2 independent lines."}
+        inc["limitations"] = [x for x in inc["limitations"] if not x.startswith("All contributing evidence shares one evidence path")]
+        if len(lines) == 1:
+            inc["limitations"].append("All contributing evidence shares one evidence path "
+                                      f"({'/'.join(sorted(lines[0]))}); agreement across FC/Lua/ground tiers is corroboration, "
+                                      "not independent confirmation.")
         n_det = len(set(inc["detectors"]) - {"ML_BASELINE"})
         prev = inc["state"]
-        if inc["confidence"] >= self.conf_thr and (len(indep) >= 2 or n_det >= 3):
+        if inc["confidence"] >= self.conf_thr and len(lines) >= 2:
             inc["state"] = "CONFIRMED"
-        elif n_det >= 2 or len(indep) >= 2:
+        elif n_det >= 2 or len(lines) >= 2:
             inc["state"] = "CORRELATED"
         else:
             inc["state"] = "SUSPECTED"
@@ -236,7 +277,9 @@ class Correlator:
             "confidence": f"{round(inc['confidence'] * 100)}%",
             "contributors": inc["contributors"],
             "limitations": inc["limitations"],
-            "state_policy": f"CONFIRMED requires confidence ≥ {self.conf_thr} and ≥2 independent sources (GROUND/FC/LUA) or ≥3 detectors.",
+            "independence": inc.get("independence"),
+            "state_policy": f"CONFIRMED requires confidence ≥ {self.conf_thr} and ≥2 independent evidence lines "
+                            f"(results sharing a sensor/data path count once; repeats weigh × {self.corroboration_w}).",
         }
 
     @staticmethod

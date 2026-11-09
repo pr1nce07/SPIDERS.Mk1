@@ -11,12 +11,12 @@ import IDSPage from "./pages/IDS";
 import Builder from "./builder/Builder";
 import Alerts from "./pages/Alerts";
 import Incidents from "./pages/Incidents";
-import Forensics from "./pages/Forensics";
 import Replay from "./pages/Replay";
 import Packets from "./pages/Packets";
 import Logs from "./pages/Logs";
 import HealthPage from "./pages/Health";
 import Settings from "./pages/Settings";
+import Silktrace from "./pages/Silktrace";
 import { setTheme, useTheme } from "./lib/theme";
 
 
@@ -28,11 +28,11 @@ const ICONS: Record<string, JSX.Element> = {
   builder: I("M5 6h4v4H5z|M15 14h4v4h-4z|M9 8h3a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2"),
   alerts: I("M6 16V11a6 6 0 0 1 12 0v5l2 2H4z|M10 20a2 2 0 0 0 4 0"),
   incidents: I("M12 3l9 16H3z|M12 10v4|M12 17h.01"),
-  forensics: I("M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14z|M20 20l-4-4"),
   replay: I("M4 12a8 8 0 1 0 3-6.3|M4 4v4h4|M11 9l4 3-4 3z"),
   packets: I("M4 6h16|M4 12h16|M4 18h10"),
   logs: I("M6 3h9l4 4v14H6z|M14 3v5h5|M9 13h6|M9 17h6"),
   health: I("M3 12h4l3-7 4 14 3-7h4"),
+  silktrace: I("M4 5h16v14H4z|M8 9h8|M8 13h5|M16 16l2 2 3-4"),
   settings: I("M12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6z|M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12z"),
 };
 
@@ -43,7 +43,7 @@ const NAV: { id: string; label: string; modes: Mode[] }[] = [
   { id: "builder", label: "Custom Ruleset", modes: ["ENGINEER"] },
   { id: "alerts", label: "Alerts", modes: ["OPERATOR", "INVESTIGATOR", "ENGINEER"] },
   { id: "incidents", label: "Incidents", modes: ["INVESTIGATOR", "ENGINEER"] },
-  { id: "forensics", label: "Forensics", modes: ["INVESTIGATOR", "ENGINEER"] },
+  { id: "silktrace", label: "SILKTRACE", modes: ["INVESTIGATOR", "ENGINEER"] },
   { id: "replay", label: "Replay", modes: ["INVESTIGATOR", "ENGINEER"] },
   { id: "packets", label: "Packets", modes: ["INVESTIGATOR", "ENGINEER"] },
   { id: "logs", label: "Logs", modes: ["INVESTIGATOR", "ENGINEER"] },
@@ -92,7 +92,7 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
           const v = (e.target as HTMLInputElement).value.trim();
           if (e.key !== "Enter" || !v) return;
           if (/^INC-/i.test(v)) go(`incidents/${v.toUpperCase()}`);
-          else if (/^(CASE-|INC-)/i.test(v)) go(`forensics/${v}`);
+          else if (/^(CASE-|INC-)/i.test(v)) go(`silktrace/${v}`);
           else go(`packets?q=${encodeURIComponent(v)}`);
         }} />
         {I("M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14z|M20 20l-4-4")}
@@ -177,6 +177,10 @@ export default function App() {
     });
   };
   const page = route.page;
+  // Forensics was merged into SILKTRACE; keep old #/forensics/<case> links working.
+  useEffect(() => {
+    if (page === "forensics") go(route.id ? `silktrace/${encodeURIComponent(route.id)}` : "silktrace");
+  }, [page, route.id]);
   // Mobile: the sidebar becomes a sheet; any navigation closes it.
   const [navOpen, setNavOpen] = useState(false);
   useEffect(() => setNavOpen(false), [page, route.id]);
@@ -187,8 +191,8 @@ export default function App() {
     return () => window.removeEventListener("keydown", k);
   }, [navOpen]);
   const Page = {
-    dashboard: Dashboard, flight: Flight, ids: IDSPage, builder: Builder, alerts: Alerts, incidents: Incidents, forensics: Forensics,
-    replay: Replay, packets: Packets, logs: Logs, health: HealthPage, settings: Settings,
+    dashboard: Dashboard, flight: Flight, ids: IDSPage, builder: Builder, alerts: Alerts, incidents: Incidents, forensics: Silktrace,
+    replay: Replay, packets: Packets, logs: Logs, health: HealthPage, settings: Settings, silktrace: Silktrace,
   }[page] || Dashboard;
 
   return (
@@ -206,7 +210,7 @@ export default function App() {
           <div className="nav-groups">
             {([
               { label: "WORKSPACE", ids: ["dashboard", "flight", "ids", "builder"] },
-              { label: "SECURITY INTELLIGENCE", ids: ["alerts", "incidents", "forensics", "replay"] },
+              { label: "SECURITY INTELLIGENCE", ids: ["alerts", "incidents", "silktrace", "replay"] },
               { label: "DATA EXPLORER", ids: ["packets", "logs"] },
               { label: "SYSTEM", ids: ["health", "settings"] },
             ] as const).map((group) => {

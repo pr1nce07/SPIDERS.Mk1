@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import time
 from dataclasses import dataclass
 from ipaddress import ip_address
 
@@ -63,11 +64,38 @@ def principal_from(config, host: str | None, auth_header: str | None, query_toke
     return p
 
 
+_DENIED: dict[tuple, float] = {}
+
+
+def record_denied(runtime, actor: str, role: str, target: str, reason: str, required: str | None = None) -> None:
+    """Audit failed authorization (GAP-13), rate-limited per (actor, target, reason) so it cannot flood the log."""
+    key, now = (actor, target, reason), time.monotonic()
+    if now - _DENIED.get(key, -1e9) < 10:
+        return
+    _DENIED[key] = now
+    if len(_DENIED) > 5000:
+        for k in sorted(_DENIED, key=_DENIED.get)[:2500]:
+            _DENIED.pop(k, None)
+    audit = getattr(runtime, "audit", None)
+    if audit is not None:
+        try:
+            audit.record("AUTHZ_DENIED", target, {"reason": reason, "required_role": required}, actor, role)
+        except Exception:
+            pass
+
+
 def require(role: str):
     def dep(request: Request) -> Principal:
-        cfg = request.app.state.runtime.config
-        p = principal_from(cfg, request.client.host if request.client else None, request.headers.get("authorization"))
+        runtime = request.app.state.runtime
+        host = request.client.host if request.client else None
+        try:
+            p = principal_from(runtime.config, host, request.headers.get("authorization"))
+        except HTTPException as exc:
+            record_denied(runtime, f"anonymous@{host}", "none", f"{request.method} {request.url.path}",
+                          (exc.detail or {}).get("type", "DENIED") if isinstance(exc.detail, dict) else "DENIED", role)
+            raise
         if not p.allows(role):
+            record_denied(runtime, p.user, p.role, f"{request.method} {request.url.path}", "INSUFFICIENT_ROLE", role)
             raise HTTPException(403, detail={"type": "FORBIDDEN", "message": f"requires role '{role}' (you are '{p.role}')"})
         request.state.principal = p
         return p

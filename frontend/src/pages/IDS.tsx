@@ -38,6 +38,7 @@ export function Comparison() {
         </table>
       </div>
       <div className="small muted">{c.jamming}</div>
+      {c.event_delivery && <EventDelivery d={c.event_delivery} />}
       {Object.keys(c.lua_health || {}).length > 0 && (
         <div>
           <div className="small muted mb">LUA SCRIPT HEALTH (from ArduPilot scripting STATUSTEXT)</div>
@@ -46,6 +47,26 @@ export function Comparison() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// GAP-07: one-way bridge delivery. Losses are made visible; they cannot be re-requested over MAVLink.
+function EventDelivery({ d }: { d: any }) {
+  const lost = d.events_missed_total > 0 || d.sequence_discontinuities > 0;
+  return (
+    <div className={`notice ${lost ? "warn" : ""}`}>
+      <div className="row wrap gap-s small">
+        <strong>FC EVENT DELIVERY</strong>
+        <Badge v={d.protocol_version ? `bridge v${d.protocol_version}` : "bridge not announced"} tone={d.protocol_version ? "info" : "warn"} />
+        {d.state_map_matches_assumed === false && <Badge v="state map differs" tone="warn" />}
+        <span>boot epoch {d.boot_epoch}{d.reboots_seen ? ` (${d.reboots_seen} reboot${d.reboots_seen > 1 ? "s" : ""} seen)` : ""}</span>
+        <span>received {d.events_received_this_boot}</span>
+        {d.events_before_connection != null && <span className="muted">before connection {d.events_before_connection}</span>}
+        <span className={lost ? "t-warn" : ""}>missed {d.events_missed_total} · seq gaps {d.sequence_discontinuities}</span>
+        <span className="muted">duplicates ignored {d.duplicates_ignored}</span>
+      </div>
+      <div className="small muted">{d.delivery_model}</div>
     </div>
   );
 }

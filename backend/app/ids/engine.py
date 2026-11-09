@@ -11,6 +11,7 @@ from typing import Iterable
 
 from ..models.events import DetectorResult, TelemetryEvent
 from .base import AnalysisContext, Detector
+from .baseline import BaselineDetector
 from .command import CommandDetector
 from .gps import GPSIntegrityDetector
 from .imu import IMUConsistencyDetector
@@ -24,13 +25,34 @@ from .pushpak_fc import PushpakFCDetector
 from .rc import RCLinkDetector
 from .vehicle import BatteryDetector, FlightModeDetector, SensorHealthDetector
 
+def _baseline(c, cfg, **k):
+    """Load the approved manifest once per session; detectors never write it (GAP-11)."""
+    from ..security.baseline import BaselineStore
+    store = BaselineStore.from_config(c)
+    doc = store.active()
+    return BaselineDetector(cfg, doc, store.keys.trusted_public_keys("approval") if doc else {})
+
+
+def _ml(c, cfg):
+    """Approved per-airframe profile when configured (GAP-16); otherwise an untrusted, gated session baseline."""
+    prof = cfg.get("profile")
+    if not prof:
+        return MLBaselineDetector(cfg)
+    from ..security.keys import KeyStore
+    from .ml_profiles import load_profile
+    path = c.resolve_path("ids.ml_profile_dir", "data/ml_profiles") / f"{prof}.json"
+    keys = KeyStore(c.resolve_path("security.keystore_dir", "data/keys"))
+    body, status = load_profile(path, keys.trusted_public_keys("approval"))
+    return MLBaselineDetector(cfg, body, status)
+
+
 # Plugin registry: detector id → factory(config, context-free kwargs)
 DETECTOR_PLUGINS = {
     "HEARTBEAT": lambda c, cfg, **k: HeartbeatDetector(cfg, stale_s=c.get("mavlink.heartbeat_stale_s", 3.0), loss_s=c.get("mavlink.heartbeat_loss_s", 6.0)),
     "MAVLINK_SEQUENCE": lambda c, cfg, **k: MavlinkSequenceDetector(cfg),
     "SOURCE_IDENTITY": lambda c, cfg, **k: SourceIdentityDetector(cfg),
     "MAVLINK_RATE": lambda c, cfg, **k: MavlinkRateDetector(cfg),
-    "MAVLINK_SIGNING": lambda c, cfg, **k: SigningDetector(cfg, expected=bool(c.get("mavlink.signing_expected", False)), key_configured=k.get("key_configured", False)),
+    "MAVLINK_SIGNING": lambda c, cfg, **k: SigningDetector(cfg, expected=bool(c.get("mavlink.signing_expected", False)), policy=c.get("mavlink.signing_policy"), key_configured=k.get("key_configured", False)),
     "GPS_INTEGRITY": lambda c, cfg, **k: GPSIntegrityDetector(cfg),
     "COMMAND": lambda c, cfg, **k: CommandDetector(cfg),
     "PARAMETER": lambda c, cfg, **k: ParameterDetector(cfg),
@@ -42,7 +64,8 @@ DETECTOR_PLUGINS = {
     "FLIGHT_MODE": lambda c, cfg, **k: FlightModeDetector(cfg),
     "SENSOR_HEALTH": lambda c, cfg, **k: SensorHealthDetector(cfg, registry=k.get("registry")),
     "PUSHPAK_FC": lambda c, cfg, **k: PushpakFCDetector(cfg),
-    "ML_BASELINE": lambda c, cfg, **k: MLBaselineDetector(cfg),
+    "ML_BASELINE": lambda c, cfg, **k: _ml(c, cfg),
+    "BASELINE": _baseline,
 }
 
 
