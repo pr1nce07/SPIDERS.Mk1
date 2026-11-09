@@ -11,6 +11,8 @@ from pathlib import Path
 
 CHUNK = 1 << 20
 HASH_FILE = "hashes.sha256"
+SIGNATURE_FILE = "case.sig.json"   # detached Ed25519 signature over the hash list (GAP-12)
+UNHASHED = {HASH_FILE, SIGNATURE_FILE}
 
 
 def sha256_file(path: Path) -> str:
@@ -28,9 +30,10 @@ def sha256_bytes(b: bytes) -> str:
 def write_hash_file(case_dir: Path) -> dict[str, str]:
     entries = {}
     for p in sorted(case_dir.rglob("*")):
-        if p.is_file() and p.name != HASH_FILE:
+        if p.is_file() and p.relative_to(case_dir).as_posix() not in UNHASHED:
             entries[p.relative_to(case_dir).as_posix()] = sha256_file(p)
-    with open(case_dir / HASH_FILE, "w", encoding="utf-8") as fh:
+    # newline="" keeps "\n" on Windows too; `sha256sum -c` would misread "\r\n" lines.
+    with open(case_dir / HASH_FILE, "w", encoding="utf-8", newline="") as fh:
         for rel, h in entries.items():
             fh.write(f"{h}  {rel}\n")
     return entries
@@ -71,7 +74,7 @@ def verify_case(case_dir: Path) -> dict:
             continue
         actual = sha256_file(p)
         results.append({"file": rel, "status": "VALID" if actual == expected else "MODIFIED", "expected": expected, "actual": actual})
-    on_disk = {p.relative_to(case_dir).as_posix() for p in case_dir.rglob("*") if p.is_file() and p.name != HASH_FILE}
+    on_disk = {p.relative_to(case_dir).as_posix() for p in case_dir.rglob("*") if p.is_file()} - UNHASHED
     for rel in sorted(on_disk - set(listed)):
         results.append({"file": rel, "status": "MODIFIED", "expected": None, "actual": sha256_file(case_dir / rel),
                         "note": "file not listed in hashes.sha256 (added after sealing)"})

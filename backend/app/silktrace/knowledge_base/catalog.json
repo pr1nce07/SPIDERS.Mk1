@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "catalog_scope": "Firmware and log-format reference index; not a verified aircraft specification database.",
+  "profiles": [
+    {
+      "id": "ardupilot",
+      "name": "ArduPilot",
+      "firmware_families": ["ArduCopter", "ArduPlane", "ArduSub", "AP_Periph"],
+      "log_formats": ["DataFlash BIN", "MAVLink TLOG"],
+      "parameter_prefixes": ["ATC_", "INS_", "EK3_", "GPS_", "BATT_", "LOG_"],
+      "references": ["https://ardupilot.org/copter/docs/common-logs.html", "https://ardupilot.org/dev/docs/logmessages.html", "https://github.com/ArduPilot/ardupilot"],
+      "limitations": "Parameter defaults and message definitions vary by firmware release, board target, and vehicle class."
+    },
+    {
+      "id": "px4",
+      "name": "PX4",
+      "firmware_families": ["PX4 Autopilot"],
+      "log_formats": ["ULog", "MAVLink TLOG"],
+      "parameter_prefixes": ["MC_", "EKF2_", "SENS_", "BAT_", "SDLOG_"],
+      "references": ["https://docs.px4.io/main/en/dev_log/ulog_file_format", "https://logs.px4.io/browse", "https://github.com/PX4/PX4-Autopilot"],
+      "limitations": "ULog topic availability depends on firmware version and logger configuration."
+    },
+    {
+      "id": "betaflight",
+      "name": "Betaflight",
+      "firmware_families": ["Betaflight"],
+      "log_formats": ["Blackbox BBL/BFL/TXT"],
+      "parameter_prefixes": ["gyro_", "acc_", "rc_", "motor_", "pid_"],
+      "references": ["https://betaflight.com/docs/development/Blackbox-Internals", "https://github.com/betaflight/blackbox-tools", "https://github.com/betaflight/blackbox-log-viewer"],
+      "limitations": "Blackbox predictor/frame decoding requires the matching blackbox-tools decoder and version-aware validation."
+    },
+    {
+      "id": "inav",
+      "name": "INAV",
+      "firmware_families": ["INAV"],
+      "log_formats": ["Blackbox"],
+      "parameter_prefixes": ["nav_", "gyro_", "acc_", "motor_"],
+      "references": ["https://github.com/iNavFlight/inav"],
+      "limitations": "Field definitions and frame encoding are version-dependent."
+    },
+    {
+      "id": "dji",
+      "name": "DJI FlightRecord",
+      "firmware_families": ["DJI Fly / supported FlightRecord formats"],
+      "log_formats": ["FlightRecord TXT v1-v14", "DAT (format-specific triage)"],
+      "parameter_prefixes": [],
+      "references": ["https://github.com/rembish/pydjirecord", "https://github.com/dji-sdk/FlightRecordParsingLib"],
+      "limitations": "FlightRecord v13-v14 frame decryption requires per-flight keychains from DJI. Aircraft DAT is distinct from app FlightRecord TXT and is not generally decoded by the FlightRecord parser."
+    },
+    {
+      "id": "unknown-custom",
+      "name": "Unknown / Custom Vehicle",
+      "firmware_families": ["User-defined"],
+      "log_formats": ["Custom binary", "CSV", "JSON", "Other"],
+      "parameter_prefixes": [],
+      "references": [],
+      "limitations": "No model defaults are applied. The investigator must supply and document field mappings, units, frames, and geometry."
+    }
+  ]
+}

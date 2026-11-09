@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api } from "../services/api";
 import { toast } from "../services/store";
 import ConnectionCenter from "../components/ConnectionCenter";
+import SecuritySettings from "../components/SecuritySettings";
 import { resolved, setTheme, useThemePref, type ThemePref } from "../lib/theme";
 import { Badge, JsonView, PageTitle, Panel, Tabs, useAsync } from "../components/ui";
 
@@ -11,10 +12,11 @@ export default function Settings() {
   return (
     <div className="col">
       <PageTitle title="Settings" />
-      <Tabs value={tab} onChange={setTab} tabs={[{ id: "connection", label: "Connection" }, { id: "caps", label: "Firmware discovery" }, { id: "settings", label: "Runtime settings" }, { id: "schema", label: "MAVLink schema" }, { id: "ui", label: "Appearance" }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ id: "connection", label: "Connection" }, { id: "caps", label: "Firmware discovery" }, { id: "settings", label: "Runtime settings" }, { id: "security", label: "Security" }, { id: "schema", label: "MAVLink schema" }, { id: "ui", label: "Appearance" }]} />
       {tab === "connection" && <Panel><ConnectionCenter /></Panel>}
       {tab === "caps" && <Caps />}
       {tab === "settings" && <RuntimeSettings />}
+      {tab === "security" && <SecuritySettings />}
       {tab === "schema" && <Schema />}
       {tab === "ui" && <Display />}
     </div>

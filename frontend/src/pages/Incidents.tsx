@@ -65,7 +65,7 @@ function EvidenceGraph({ graph }: { graph: any }) {
     if (d.kind === "detector") openDrawer({ kind: "result", id: d.ref.result_id });
     else if (d.kind === "message") openDrawer({ kind: "packet", session: d.ref.session_id, idx: d.ref.idx });
     else if (d.kind === "rule") go(`builder/${d.ref.rule_id}`);
-    else if (d.kind === "snapshot") go(`forensics/${d.ref.case_id}`);
+    else if (d.kind === "snapshot") go(`silktrace/${d.ref.case_id}`);
   };
   return <div style={{ height: 460 }}><ReactFlow nodes={nodes} edges={edges} fitView minZoom={0.15} onNodeClick={(_, n) => click(n)} colorMode={theme} proOptions={{ hideAttribution: true }}><Background gap={24} color="var(--line)" /></ReactFlow></div>;
 }
@@ -95,7 +95,7 @@ function IncidentDetail({ id }: { id: string }) {
         <select className="in" value="" onChange={(e) => e.target.value && setStatus(e.target.value)}><option value="">Set status…</option>{["ACKNOWLEDGED", "INVESTIGATING", "RESOLVED", "FALSE_POSITIVE", "OPEN"].map((s) => <option key={s}>{s}</option>)}</select>
         <button className="btn sm" onClick={snapshot}>Create snapshot</button>
         {inc.case_id && <button className="btn sm" onClick={() => captureScreenshot(inc.case_id!)}>Capture screenshot</button>}
-        {inc.case_id && <button className="btn sm primary" onClick={() => go(`forensics/${inc.case_id}`)}>Case {inc.case_id}</button>}</>} />
+        {inc.case_id && <button className="btn sm primary" onClick={() => go(`silktrace/${inc.case_id}`)}>Case {inc.case_id}</button>}</>} />
       <Panel><div className="grid g3">
         <KV rows={[["First seen", dateTime(inc.first_seen)], ["Last seen", dateTime(inc.last_seen)], ["Session", <span className="mono small">{inc.session_id}</span>], ["Domain", inc.domain], ["Created because", inc.creation_reason]]} />
         <div><div className="small muted mb">CONFIDENCE {Math.round(inc.confidence * 100)}% (separate from severity)</div><Contributors items={inc.contributors} /></div>

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ..models.events import DetectorResult, TelemetryEvent, iso_from_epoch, state_rank
+from .lineage import lineage_for
 
 
 @dataclass
@@ -95,6 +96,8 @@ class Detector:
             detector_version=self.version, packet_refs=list(refs or ([ev.idx] if ev else [])),
             sysid=ev.sysid if ev else None, compid=ev.compid if ev else None, kind=kind,
         )
+        lin = lineage_for(r)
+        r.lineage = list(lin) if lin else None
         r.explanation = {
             "what": title,
             "why": why,

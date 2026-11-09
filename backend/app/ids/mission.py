@@ -36,6 +36,7 @@ class MissionDetector(Detector):
         self.cur_seq: Optional[int] = None
         self.set_current_t: Optional[float] = None
         self.versions: list[dict] = []
+        self.last_items: Optional[list] = None
 
     def process(self, ev: TelemetryEvent, ctx: AnalysisContext):
         self.mark_data(ctx)
@@ -81,6 +82,7 @@ class MissionDetector(Detector):
         version = {"fingerprint": fp, "count": len(items), "sysid": tr["sysid"], "t": ctx.t,
                    "to_vehicle": tr["to_vehicle"], "items": items[:200]}
         self.versions.append({k: v for k, v in version.items() if k != "items"})
+        self.last_items = items  # full list, for the approved-baseline workflow (GAP-11)
         if self.current is None:
             self.baseline = self.current = version
             return [self.result(ctx, "OBSERVED", f"Mission recorded ({len(items)} items)", kind="observation", ev=ev,

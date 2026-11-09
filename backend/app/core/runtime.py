@@ -28,6 +28,7 @@ from ..ids.rule_store import RuleStore
 from ..ids.rules import compile_rule, validate_rule
 from ..mavlink.registry import DialectRegistry
 from ..models.events import iso_from_epoch, utc_now_iso
+from ..security.keys import KeyStore
 from ..sources.files import SourceItem, detect_format, open_source
 from ..sources.live import LiveMavlinkSource, parse_spec
 from ..sources.simulation import SCENARIOS, FlightSimulator
@@ -141,6 +142,10 @@ class Runtime:
         self.db = D.DBWriter(self.engine, self.errors, float(config.get("database.batch_interval_s", 0.5)),
                              int(config.get("database.max_queue", 50000)), int(config.get("database.emergency_queue", 20000)))
         self.audit = AuditLog(self.engine, self.dirs["audit"])
+        self.keys = KeyStore(config.resolve_path("security.keystore_dir", "data/keys"))
+        self.sign_evidence = bool(config.get("security.sign_evidence", True))
+        self.audit.on_record = self._audit_checkpoint
+        self.signing_key_id: Optional[str] = None
         self.bus = EventBus(default_maxsize=5000)
         self.hub = Hub(int(config.get("limits.max_ws_queue", 500)))
         self.registry = DialectRegistry(config.get("mavlink.dialect", "ardupilotmega"), config.get("mavlink.dialect_xml"), self.dirs["work"])
@@ -176,10 +181,45 @@ class Runtime:
         return {"vehicle": {}, "pushpak": {}, "mavlink": {"version": "2", "custom_dialect": False}, "findings": [],
                 "discrepancies": [], "note": "capabilities.json missing — run scripts/discover_firmware.py"}
 
+    def _audit_checkpoint(self, entry: dict) -> None:
+        """Every N audit entries, sign the chain head and copy it to the (separately administered) mirror (GAP-12)."""
+        every = int(self.config.get("audit.checkpoint_every", 100) or 0)
+        if not self.sign_evidence or every <= 0 or entry["seq"] % every:
+            return
+        try:
+            from ..security.evidence import write_checkpoint
+            mirror = self.config.get("audit.checkpoint_mirror_dir")
+            write_checkpoint(self.audit, self.keys.signing_key("evidence"), self.dirs["audit"], Path(mirror) if mirror else None)
+        except Exception as exc:
+            self.errors.record("AUDIT", "CHECKPOINT_FAILED", f"{type(exc).__name__}: {exc}", recoverable=True)
+
+    def apply_signing_key(self, kid: Optional[str], key: Optional[bytes]) -> None:
+        """Switch the MAVLink validation key, including on the running session's decoders (receive-only)."""
+        self.signing_key, self.signing_key_id = key, kid
+        sess = self.active
+        if sess is not None:
+            p = sess.pipeline
+            p.signing_key = key
+            for d in p.decoders.values():
+                d.signing_key_configured = key is not None
+                d.mav.signing.secret_key = key
+                d.mav.signing.sign_outgoing = False
+                d.mav.signing.allow_unsigned_callback = lambda mav, msgid: True
+            sig = p.engine.get("MAVLINK_SIGNING")
+            if sig is not None:
+                sig.key_configured = key is not None
+
     def _load_signing_key(self) -> Optional[bytes]:
         p = self.config.get("mavlink.signing_key_file")
         if not p:
-            return None
+            # No explicit file: use the active key from the GCS keyring, if any (GAP-08).
+            try:
+                kid, key = self.keys.active_mavlink_secret()
+                self.signing_key_id = kid
+                return key
+            except Exception as exc:
+                self.errors.record("SIGNING", "KEY_LOAD_FAILED", f"active keyring key unusable: {type(exc).__name__}", recoverable=True)
+                return None
         try:
             b = Path(p).read_bytes().strip()
             if len(b) == 64:
@@ -232,7 +272,8 @@ class Runtime:
 
     def _new_pipeline(self, session_id: str, kind: str, source: str, *, live_clock: bool, persist: bool = True,
                       bus: bool = True, record: bool = True, snapshots: bool = True) -> Pipeline:
-        snaps = SnapshotManager(self.dirs["cases"], self.config, self.errors, on_case=self._on_case) if snapshots else None
+        snaps = SnapshotManager(self.dirs["cases"], self.config, self.errors, on_case=self._on_case,
+                                keystore=self.keys if self.sign_evidence else None) if snapshots else None
         p = Pipeline(session_id=session_id, kind=kind, source_desc=source, config=self.config, registry=self.registry,
                      errors=self.errors, capabilities=self.capabilities, allocator=self.allocator,
                      db=self.db if persist else None, bus=self.bus if bus else None, snapshots=snaps,
@@ -580,6 +621,7 @@ class Runtime:
                          "correlated": corr})
         lua_health = pk.lua_health if pk else {}
         return {"rows": rows, "lua_health": lua_health,
+                "event_delivery": pk.delivery.status() if pk is not None and hasattr(pk, "delivery") else None,
                 "jamming": "JAMMING is not a PIDS detector in the supplied source; jamming_confirm.lua classifies RC_LINK evidence (shown under RC_LINK).",
                 "fc_available": bool(pk and pk.fc), "lua_available": bool(pk and pk.lua),
                 "firmware_note": next((d["summary"] for d in self.capabilities.get("discrepancies", []) if d["id"] == "DISC-001"), None)}

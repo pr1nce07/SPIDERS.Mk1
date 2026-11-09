@@ -61,7 +61,7 @@ LUA_SCRIPT_FOR_DETECTOR = {
 }
 LUA_CONFIRM_THRESHOLD = 0.78  # `combined >= 0.78` in every *_confirm.lua
 
-_PIDS_RE = re.compile(r"^PIDS\|(\d+)\|([A-Z_]+)\|([A-Z_]+)\|(-?\d+)\|(-?[0-9.]+)\|(\d+)\|(-?[0-9.]+)\|(\d+)\s*$")
+_PIDS_RE = re.compile(r"^PIDS\|(\d+)\|([A-Z_]+)\|([A-Z_]+)\|(-?\d+)\|(-?[0-9.]+)\|(\d+)\|(-?[0-9.]+)\|(\d+)(?:\|(\d+)\|(\d+))?\s*$")
 _LUA_PREFIX = "PUSHPAK IDS: "
 _GPS_RE = re.compile(r"^GPS CONFIRMED conf=([0-9.]+) pos=([0-9.]+)m vel=([0-9.]+)m/s robust=([0-9.]+) cusum=([0-9.]+)")
 _CLASS_RE = re.compile(r"^([A-Z_]+) conf=([0-9.]+) evidence=0x([0-9A-Fa-f]{1,4})")
@@ -90,9 +90,9 @@ def parse_statustext(text: str) -> Optional[dict]:
     s = text.rstrip("\x00").strip()
     m = _PIDS_RE.match(s)
     if m:
-        ver, origin, det, st, conf, ev, metric, inst = m.groups()
+        ver, origin, det, st, conf, ev, metric, inst, boot, seq = m.groups()
         st_i = int(st)
-        return {
+        return {"boot_id": int(boot) if boot else None, "seq": int(seq) if seq else None,
             "kind": "PIDS", "format_version": int(ver), "origin": origin, "detector": det,
             "state_raw": st_i, "state": PIDS_STATE_MAP.get(st_i, f"UNKNOWN({st_i})"),
             "state_map_verified": PIDS_STATE_MAP_VERIFIED,
@@ -102,9 +102,19 @@ def parse_statustext(text: str) -> Optional[dict]:
         }
     if s.startswith(_LUA_PREFIX):
         body = s[len(_LUA_PREFIX):]
-        b = re.match(r"^BRIDGE binding=([a-z_,]+)", body)
+        b = re.match(r"^BRIDGE binding=([a-z_,]+)(?: v=(\d+))?", body)
         if b:
-            return {"kind": "BRIDGE", "detector": None, "binding": b.group(1).split(","), "original": text}
+            return {"kind": "BRIDGE", "detector": None, "binding": b.group(1).split(","),
+                    "protocol_version": int(b.group(2)) if b.group(2) else 1, "original": text}
+        sm = re.match(r"^STATEMAP ((?:-?\d+=[A-Z_]+,?)+)\s*$", body)
+        if sm:
+            mapping = {int(k): v for k, v in (p.split("=", 1) for p in sm.group(1).strip(",").split(","))}
+            return {"kind": "STATEMAP", "detector": None, "state_map": mapping, "original": text}
+        sy = re.match(r"^SYNC up=(\d+) seq=(\d+) ev=(\d+)(?: boot=(\d+))?(?: drop=(\d+))?", body)
+        if sy:
+            return {"kind": "SYNC", "detector": None, "uptime_s": int(sy.group(1)), "sequence": int(sy.group(2)),
+                    "events_sent": int(sy.group(3)), "boot_id": int(sy.group(4)) if sy.group(4) else None,
+                    "ring_dropped": int(sy.group(5)) if sy.group(5) else None, "original": text}
         fe = re.match(r"^FC_EVENT seq=(\d+) delta=(-?\d+)", body)
         if fe:
             return {"kind": "FC_EVENT", "detector": None, "sequence": int(fe.group(1)), "delta": int(fe.group(2)), "original": text}
@@ -134,6 +144,120 @@ def parse_statustext(text: str) -> Optional[dict]:
                 "is_error": bool(re.search(r"error|attempt|nil|fail|bad|memory", e.group(2), re.I)),
                 "original": text}
     return None
+
+
+class EventDeliveryTracker:
+    """Bridge protocol state and event-loss accounting (GAP-07).
+
+    Delivery is one-way and best-effort: the GCS never acknowledges. Loss is made
+    *visible* instead: the bridge's SYNC line says how many FC_EVENT lines it sent
+    since boot, and an uptime drop marks a new boot epoch. FC_EVENTs are keyed by
+    (boot_epoch, seq) so repeats are ignored.
+    """
+
+    def __init__(self):
+        self.protocol_version: Optional[int] = None
+        self.binding: list[str] = []
+        self.state_map: Optional[dict[int, str]] = None
+        self.boot_epoch = 0
+        self.reboots = 0
+        self.last_uptime: Optional[int] = None
+        self.last_seq: Optional[int] = None
+        self.received = 0                 # FC_EVENT lines received this boot epoch
+        self.baseline_sent: Optional[int] = None  # bridge's count at our first SYNC of the epoch (pre-connection history)
+        self.missed_total = 0
+        self.missed_reported = 0
+        self.duplicates = 0
+        self.seq_jumps = 0
+        self._seen: set[tuple] = set()
+        self.last_sync: Optional[dict] = None
+        self.native_boot: Optional[int] = None    # AP_IDS boot ID, when the firmware provides one (FW-06)
+        self.ring_dropped = 0                     # AP_IDS event-ring overflow count (FW-06)
+        self.native_duplicates = 0
+
+    @property
+    def state_map_matches_assumed(self) -> Optional[bool]:
+        return None if self.state_map is None else self.state_map == PIDS_STATE_MAP
+
+    def on_bridge(self, rec: dict) -> None:
+        self.protocol_version = rec.get("protocol_version", 1)
+        self.binding = rec.get("binding") or []
+
+    def on_statemap(self, rec: dict) -> None:
+        self.state_map = dict(rec["state_map"])
+
+    def _new_epoch(self) -> None:
+        self.boot_epoch += 1
+        self.reboots += 1
+        self.last_seq = None
+        self.received = 0
+        self.baseline_sent = None
+        self.missed_reported = 0
+
+    def on_sync(self, rec: dict) -> dict:
+        """Returns {"reboot": bool, "new_missing": int, "pre_connection_events": int|None}."""
+        out = {"reboot": False, "new_missing": 0, "pre_connection_events": None, "new_ring_drops": 0}
+        up = rec["uptime_s"]
+        boot = rec.get("boot_id")
+        if boot is not None and self.native_boot is not None and boot != self.native_boot:
+            self._new_epoch()               # explicit boot ID beats the uptime heuristic
+            out["reboot"] = True
+        elif boot is None and self.last_uptime is not None and up + 2 < self.last_uptime:
+            self._new_epoch()
+            out["reboot"] = True
+        if boot is not None:
+            self.native_boot = boot
+        if rec.get("ring_dropped") is not None:
+            if rec["ring_dropped"] > self.ring_dropped:
+                out["new_ring_drops"] = rec["ring_dropped"] - self.ring_dropped
+            self.ring_dropped = rec["ring_dropped"]
+        self.last_uptime = up
+        self.last_sync = rec
+        if self.baseline_sent is None:
+            # Events the bridge sent before this GCS saw a SYNC were never deliverable to us.
+            self.baseline_sent = max(0, rec["events_sent"] - self.received)
+            out["pre_connection_events"] = self.baseline_sent
+        missing = max(0, rec["events_sent"] - self.baseline_sent - self.received)
+        if missing > self.missed_reported:
+            out["new_missing"] = missing - self.missed_reported
+            self.missed_total += out["new_missing"]
+            self.missed_reported = missing
+        return out
+
+    def on_native_event(self, boot_id: int, seq: int) -> bool:
+        """True if this (boot, seq) AP_IDS event was already seen (STATUSTEXT repeat or DataFlash replay)."""
+        key = ("native", boot_id, seq)
+        if key in self._seen:
+            self.native_duplicates += 1
+            return True
+        self._seen.add(key)
+        return False
+
+    def on_fc_event(self, rec: dict) -> dict:
+        """Returns {"duplicate": bool, "gap": bool}."""
+        key = (self.boot_epoch, rec["sequence"])
+        if key in self._seen:
+            self.duplicates += 1
+            return {"duplicate": True, "gap": False}
+        self._seen.add(key)
+        if len(self._seen) > 5000:
+            self._seen = {k for k in self._seen if k[0] == self.boot_epoch}
+        gap = self.last_seq is not None and rec["sequence"] - rec["delta"] != self.last_seq
+        if gap:
+            self.seq_jumps += 1
+        self.last_seq = rec["sequence"]
+        self.received += 1
+        return {"duplicate": False, "gap": gap}
+
+    def status(self) -> dict:
+        return {"protocol_version": self.protocol_version, "binding": self.binding, "state_map": self.state_map,
+                "state_map_matches_assumed": self.state_map_matches_assumed, "boot_epoch": self.boot_epoch,
+                "reboots_seen": self.reboots, "last_uptime_s": self.last_uptime, "last_event_seq": self.last_seq,
+                "events_received_this_boot": self.received, "events_before_connection": self.baseline_sent,
+                "events_missed_total": self.missed_total, "duplicates_ignored": self.duplicates,
+                "sequence_discontinuities": self.seq_jumps, "native_boot_id": self.native_boot,
+                "native_ring_dropped": self.ring_dropped, "native_duplicates_ignored": self.native_duplicates,
+                "delivery_model": "one-way best-effort telemetry; durable onboard record requires AP_IDS DataFlash logging (firmware)"}
 
 
 class StatusTextAssembler:

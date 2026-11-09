@@ -310,7 +310,8 @@ def track_points(rt, session_id: str, t_from=None, t_to=None, kind="EKF", max_po
 
 # ------------------------------------------------------------------ cases
 def case_dir(rt, case_id: str) -> Path:
-    if not case_id or "/" in case_id or ".." in case_id:
+    # "\" and ":" matter on Windows: "\x" or "C:x" would escape the cases folder when joined.
+    if not case_id or ".." in case_id or any(c in case_id for c in "/\\:"):
         raise ValueError("invalid case id")
     return rt.dirs["cases"] / case_id
 
@@ -376,7 +377,8 @@ def case_detail(rt, case_id: str) -> Optional[dict]:
 def read_case_file(rt, case_id: str, rel: str, max_bytes: int = 2_000_000) -> tuple[bytes, Path]:
     d = case_dir(rt, case_id).resolve()
     p = (d / rel).resolve()
-    if not str(p).startswith(str(d) + "/") or not p.is_file():
+    # Path-aware containment check: works with both "/" and Windows "\" separators.
+    if p == d or not p.is_relative_to(d) or not p.is_file():
         raise FileNotFoundError(rel)
     with open(p, "rb") as fh:
         return fh.read(max_bytes), p

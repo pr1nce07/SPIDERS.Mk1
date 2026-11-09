@@ -12,7 +12,10 @@ mavlink:
   vehicle_sysid: null           # null = learn from first autopilot HEARTBEAT
   trusted_gcs_sysids: [255]     # expected ground-station system IDs
   signing_key_file: null        # path to 32-byte key file; never displayed/exported
-  signing_expected: false
+  signing_expected: false        # legacy switch: true = signing_policy.default 'required'
+  signing_policy:                # GAP-08: off | optional | required, per link name (e.g. udp:0.0.0.0:14550)
+    default: null                # null = derive from signing_expected
+    links: {}
   heartbeat_stale_s: 3.0
   heartbeat_loss_s: 6.0
 
@@ -35,6 +38,7 @@ ids:
   enabled: true
   suspected_threshold: 0.45
   confirmed_threshold: 0.75
+  corroboration_weight: 0.35     # GAP-09: weight of evidence that re-derives an already-counted sensor/data path
   correlation_window_seconds: 10
   min_correlated_detectors: 2
   tick_hz: 1.0
@@ -154,6 +158,15 @@ security:
   # token_hash is sha256(hex) of a bearer token; tokens themselves are never stored.
   tokens: []
   # - {token_hash: "...", role: engineer, user: alice}
+  keystore_dir: "data/keys"     # GAP-08/12: MAVLink keyring + Ed25519 evidence/approval keys (protect with OS permissions)
+  sign_evidence: true            # sign sealed cases (case.sig.json) and audit checkpoints
+
+audit:
+  checkpoint_every: 100          # sign the audit chain head every N entries
+  checkpoint_mirror_dir: null    # GAP-12: a separately administered location (network share, WORM store)
+
+baseline:
+  manifest_dir: "data/baselines" # GAP-11: signed approved mission/parameter baseline (active.json + history/)
 
 simulation:
   home_lat: 12.9716

@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -19,11 +20,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, select
 
 from .api import queries as Q
-from .api.security import Principal, require, ws_principal
+from .api.security import Principal, record_denied, require, ws_principal
 from .config import PROJECT_ROOT, Config
 from .core.runtime import VERSION, Runtime
 from .forensic.hashing import sha256_file, verify_case
 from .forensic.snapshot import SnapshotManager
+from .silktrace.service import SILKTRACE
 from .ids.rules import catalog as rule_catalog
 from .ids.rules import validate_rule
 from .ids.rule_store import _definition
@@ -54,7 +56,7 @@ MAX_JSON = 2 * 1024 * 1024
 @app.middleware("http")
 async def bounded_payloads(request: Request, call_next):
     cl = request.headers.get("content-length")
-    limit = int(config.get("limits.max_upload_mb", 1024)) * (1 << 20) if request.url.path == "/api/logs/import" or "screenshot" in request.url.path else MAX_JSON
+    limit = int(config.get("limits.max_upload_mb", 1024)) * (1 << 20) if request.url.path in ("/api/logs/import", "/api/silktrace/evidence") or "screenshot" in request.url.path else MAX_JSON
     if cl and cl.isdigit() and int(cl) > limit:
         return JSONResponse({"error_id": None, "type": "PAYLOAD_TOO_LARGE", "message": f"request body exceeds {limit} bytes"}, status_code=413)
     return await call_next(request)
@@ -282,6 +284,7 @@ def alert_status(request: Request, alert_id: str, body: StatusBody, p: Principal
     if body.status not in ALERT_STATUSES:
         raise HTTPException(400, detail={"type": "INVALID_STATUS", "message": f"status must be one of {sorted(ALERT_STATUSES)}"})
     if body.status in ("FALSE_POSITIVE", "RESOLVED") and not p.allows("investigator"):
+        record_denied(r, p.user, p.role, f"POST {request.url.path} status={body.status}", "INSUFFICIENT_ROLE", "investigator")
         raise HTTPException(403, detail={"type": "FORBIDDEN", "message": "investigator role required"})
     found = None
     if r.active and alert_id in r.active.pipeline.alerts:
@@ -557,8 +560,11 @@ def forensics_verify(request: Request, body: VerifyBody, p: Principal = INVESTIG
     r = rt(request)
     d = Q.case_dir(r, body.case_id)
     res = verify_case(d)
+    from .security.evidence import verify_case_signature
+    res["signature"] = verify_case_signature(d, r.keys.trusted_public_keys("evidence"))
     r.db.insert("artifact_hashes", {"case_id": body.case_id, "verified_at": utc_now_iso(), "result": res["status"], "data": D.dumps(res)}, critical=True)
-    r.audit.record("HASH_VERIFIED", body.case_id, {"result": res["status"], "files": res.get("files_checked")}, p.user, p.role)
+    r.audit.record("HASH_VERIFIED", body.case_id, {"result": res["status"], "files": res.get("files_checked"),
+                                                   "signature": res["signature"]["status"]}, p.user, p.role)
     return {"case_id": body.case_id, **res}
 
 
@@ -571,7 +577,7 @@ async def case_screenshot(request: Request, case_id: str, file: UploadFile = Fil
     name = f"screenshots/incident-{case_id}.png"
     if (Q.case_dir(r, case_id) / name).exists():
         name = f"screenshots/incident-{case_id}-{utc_now_iso().replace(':', '')}.png"
-    mgr = SnapshotManager(r.dirs["cases"], r.config, r.errors)
+    mgr = SnapshotManager(r.dirs["cases"], r.config, r.errors, keystore=r.keys if r.sign_evidence else None)
     res = await asyncio.to_thread(mgr.add_artifact, case_id, name, data, "GUI screenshot (html2canvas) captured by operator client")
     r.audit.record("CASE_ARTIFACT_ADDED", case_id, {"file": name, "sha256": res["artifact"]["sha256"],
                                                     "previous_manifest_sha256": res["previous_manifest_sha256"]}, p.user, p.role)
@@ -584,6 +590,164 @@ def case_export(request: Request, case_id: str, p: Principal = INVESTIGATE):
     z = SnapshotManager(r.dirs["cases"], r.config, r.errors).export_zip(case_id)
     r.audit.record("CASE_EXPORTED", case_id, {"file": z.name, "sha256": sha256_file(z)}, p.user, p.role)
     return FileResponse(z, filename=z.name, media_type="application/zip")
+
+
+class CustodyBody(BaseModel):
+    event: str = Field(..., pattern="^(TRANSFERRED|RECEIVED|EXPORTED|REVIEWED|SEALED_COPY_MADE)$")
+    to: str = Field("", max_length=200)
+    note: str = Field("", max_length=500)
+
+
+@app.post("/api/forensics/cases/{case_id}/custody")
+def case_custody(request: Request, case_id: str, body: CustodyBody, p: Principal = INVESTIGATE):
+    """Record a custody event as a new signed manifest revision (GAP-12). Evidence files are not changed."""
+    r = rt(request)
+    Q.case_dir(r, case_id)  # validates the id
+    mgr = SnapshotManager(r.dirs["cases"], r.config, r.errors, keystore=r.keys if r.sign_evidence else None)
+    res = mgr.add_custody_event(case_id, body.event, p.user, body.to, body.note)
+    r.audit.record("CASE_CUSTODY", case_id, {"event": body.event, "to": body.to, "manifest_sha256": res["manifest_sha256"]}, p.user, p.role)
+    return res
+
+
+# ====================================================================== security: keys, evidence signing, baselines
+def _key_view(r) -> dict:
+    from cryptography.hazmat.primitives import serialization
+    from .security.keys import public_key_id
+    out = {"mavlink": {"keys": r.keys.mavlink_keys(), "active_key_id": r.signing_key_id,
+                       "config_file_key": bool(r.config.get("mavlink.signing_key_file")),
+                       "note": "Secrets are never returned by the API. MAVLink signing authenticates frames; it does not encrypt."}}
+    for purpose in ("evidence", "approval"):
+        pem = r.keys.public_key_pem(purpose)
+        out[purpose] = {"key_id": public_key_id(serialization.load_pem_public_key(pem.encode())), "public_key_pem": pem}
+    return out
+
+
+@app.get("/api/security/keys")
+def security_keys(request: Request, _=INVESTIGATE):
+    return _key_view(rt(request))
+
+
+class KeyNote(BaseModel):
+    note: str = Field("", max_length=200)
+
+
+class RevokeBody(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=300)
+
+
+@app.post("/api/security/mavlink-keys")
+def mavlink_key_generate(request: Request, body: KeyNote, p: Principal = ENGINEER):
+    r = rt(request)
+    rec = r.keys.generate_mavlink_key(p.user, body.note)
+    r.audit.record("SIGNING_KEY_GENERATED", rec["key_id"], {"note": body.note}, p.user, p.role)
+    return rec
+
+
+@app.post("/api/security/mavlink-keys/{key_id}/activate")
+def mavlink_key_activate(request: Request, key_id: str, p: Principal = ENGINEER):
+    r = rt(request)
+    if r.config.get("mavlink.signing_key_file"):
+        raise HTTPException(409, detail={"type": "KEY_FILE_CONFIGURED",
+                                         "message": "mavlink.signing_key_file is set in config; remove it to use the keyring"})
+    rec = r.keys.activate(key_id, p.user)
+    r.apply_signing_key(key_id, r.keys.secret(key_id))
+    r.audit.record("SIGNING_KEY_ACTIVATED", key_id, {}, p.user, p.role)
+    return rec
+
+
+@app.post("/api/security/mavlink-keys/{key_id}/revoke")
+def mavlink_key_revoke(request: Request, key_id: str, body: RevokeBody, p: Principal = ENGINEER):
+    r = rt(request)
+    rec = r.keys.revoke(key_id, p.user, body.reason)
+    if r.signing_key_id == key_id:
+        r.apply_signing_key(None, None)
+    r.audit.record("SIGNING_KEY_REVOKED", key_id, {"reason": body.reason}, p.user, p.role)
+    return rec
+
+
+@app.post("/api/security/mavlink-keys/{key_id}/export")
+def mavlink_key_export(request: Request, key_id: str, p: Principal = ENGINEER):
+    """Writes the secret to data/keys/provisioning for a maintenance-link load onto the vehicle; returns only the path."""
+    r = rt(request)
+    out = r.keys.export_for_provisioning(key_id, p.user)
+    r.audit.record("SIGNING_KEY_EXPORTED", key_id, {"file": out.name}, p.user, p.role)
+    return {"key_id": key_id, "file": str(out),
+            "instructions": "Load this key onto the vehicle over a wired/secure maintenance connection, then delete the file. "
+                            "Never send it over the telemetry link."}
+
+
+@app.post("/api/audit/checkpoint")
+def audit_checkpoint(request: Request, p: Principal = ENGINEER):
+    from .security.evidence import write_checkpoint
+    r = rt(request)
+    mirror = r.config.get("audit.checkpoint_mirror_dir")
+    res = write_checkpoint(r.audit, r.keys.signing_key("evidence"), r.dirs["audit"], Path(mirror) if mirror else None, p.user)
+    r.audit.record("AUDIT_CHECKPOINT", str(res["entries"]), {"head_hash": res["head_hash"], "key_id": res["key_id"]}, p.user, p.role)
+    return res
+
+
+@app.get("/api/audit/checkpoints/verify")
+def audit_checkpoints_verify(request: Request, mirror: bool = False, _=INVESTIGATE):
+    from .security.evidence import CHECKPOINTS, verify_checkpoints
+    r = rt(request)
+    m = r.config.get("audit.checkpoint_mirror_dir")
+    path = Path(m) / CHECKPOINTS if (mirror and m) else r.dirs["audit"] / CHECKPOINTS
+    return verify_checkpoints(r.audit, r.keys.trusted_public_keys("evidence"), path)
+
+
+def _vehicle_identity(r) -> dict:
+    sess = r.active
+    v = (r.capabilities or {}).get("vehicle", {}) or {}
+    return {"sysid": sess.pipeline.ctx.vehicle_sysid if sess else None, "board": v.get("board"), "firmware": v.get("firmware")}
+
+
+@app.get("/api/baseline")
+def baseline_status(request: Request, _=VIEW):
+    from .security.baseline import BaselineStore
+    r = rt(request)
+    store = BaselineStore.from_config(r.config)
+    out = store.status(_vehicle_identity(r))
+    sess = r.active
+    det = sess.pipeline.engine.get("BASELINE") if sess else None
+    out["live"] = det.metrics if det is not None else None
+    out["parameters"] = ((store.active() or {}).get("body") or {}).get("parameters")
+    return out
+
+
+class BaselineBody(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=500)
+    profile_version: str = Field(..., min_length=1, max_length=40)
+    parameters: Optional[dict[str, float]] = None      # explicit values; omit to use the vehicle's currently reported values
+    parameter_names: Optional[list[str]] = None         # restrict "current values" to these names
+    include_mission: bool = False                       # use the last complete mission seen on the link
+
+
+@app.post("/api/baseline/approve")
+def baseline_approve(request: Request, body: BaselineBody, p: Principal = ENGINEER):
+    """Maintenance workflow: approve a new signed baseline. Records who, why and the previous digest (GAP-11)."""
+    from .security.baseline import BaselineStore
+    r = rt(request)
+    params = body.parameters
+    mission = None
+    sess = r.active
+    if params is None:
+        det = sess.pipeline.engine.get("PARAMETER") if sess else None
+        if det is None or not det.values:
+            raise HTTPException(409, detail={"type": "NO_PARAMETERS", "message": "no parameter values observed; supply them explicitly"})
+        params = {k: float(v) for k, v in det.values.items() if not body.parameter_names or k in body.parameter_names}
+    if body.include_mission:
+        md = sess.pipeline.engine.get("MISSION") if sess else None
+        items = md.last_items if md is not None else None
+        if items is None:
+            raise HTTPException(409, detail={"type": "NO_MISSION", "message": "no complete mission transfer has been observed"})
+        mission = items
+    res = BaselineStore.from_config(r.config).approve(vehicle=_vehicle_identity(r), parameters=params, mission_items=mission,
+                                                      approved_by=p.user, reason=body.reason, profile_version=body.profile_version)
+    r.audit.record("BASELINE_APPROVED", res["digest"][:16], {"previous_digest": res["previous_digest"], "reason": body.reason,
+                                                             "parameters": len(params), "mission": mission is not None}, p.user, p.role)
+    return {"digest": res["digest"], "previous_digest": res["previous_digest"], "parameters": len(params),
+            "mission_items": None if mission is None else len(mission),
+            "note": "Takes effect for the next session; running detectors keep the baseline they loaded."}
 
 
 # ====================================================================== connection / sessions / replay
@@ -657,6 +821,133 @@ def sessions(request: Request, _=VIEW):
 def scenarios(_=VIEW):
     return scenario_list()
 
+
+# ====================================================================== SILKTRACE universal drone evidence
+_SILKTRACE_ROOT = PROJECT_ROOT / "data" / "silktrace"
+_silktrace = SILKTRACE(_SILKTRACE_ROOT, int(config.get("limits.max_upload_mb", 1024)) * (1 << 20))
+
+@app.get("/api/silktrace/capabilities")
+def silktrace_capabilities(_=VIEW):
+    return {"name": "SILKTRACE", "evidence_acceptance": "L0-L1 for unknown files", "known_families": ["ArduPilot DataFlash", "PX4 ULog", "Betaflight Blackbox header inspection / optional blackbox_decode", "MAVLink raw stream", "CSV/TSV", "JSON", "NMEA", "SQLite", "ZIP", "PCAP"], "unknown_format_fallback": True, "semantic_decode_is_format_dependent": True, "originals_immutable_by_policy": True, "replay": ["2D recorded GPS track", "3D attitude orientation"], "dji": "FlightRecord TXT v1-12 semantic decode when pydjirecord is installed; v13-14 header-only without keychains; conservative DAT triage", "sandbox": "isolated built-in parser subprocess with resource limits", "vehicle_knowledge_base": "ecosystem reference index plus investigator custom profiles", "behaviour_analysis": ["robust MAD screening", "optional IsolationForest"]}
+
+@app.post("/api/silktrace/evidence")
+async def silktrace_ingest(request: Request, file: UploadFile = File(...), notes: str = Form(""), p: Principal = INVESTIGATE):
+    limit = int(rt(request).config.get("limits.max_upload_mb", 1024)) * (1 << 20)
+    fd, tmp_name = tempfile.mkstemp(dir=rt(request).dirs["work"], suffix=".silktrace-upload")
+    os.close(fd)
+    tmp = Path(tmp_name)
+    size = 0
+    try:
+        with tmp.open("wb") as fh:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(413, detail={"type": "PAYLOAD_TOO_LARGE", "message": "evidence exceeds configured upload limit"})
+                fh.write(chunk)
+        return await asyncio.to_thread(_silktrace.ingest, file.filename or "unknown.bin", tmp, p.user, notes)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+@app.get("/api/silktrace/evidence")
+def silktrace_list(_=VIEW):
+    return _silktrace.list()
+
+@app.get("/api/silktrace/evidence/{evidence_id}")
+def silktrace_get(evidence_id: str, _=VIEW):
+    record = _silktrace.get(evidence_id)
+    if not record:
+        raise HTTPException(404, detail={"type": "NOT_FOUND", "message": "evidence item not found"})
+    return record
+
+@app.post("/api/silktrace/evidence/{evidence_id}/schema")
+def silktrace_apply_schema(evidence_id: str, schema: dict, request: Request, p: Principal = INVESTIGATE):
+    try:
+        return _silktrace.apply_schema(evidence_id, schema, p.user)
+    except KeyError:
+        raise HTTPException(404, detail={"type": "NOT_FOUND", "message": "evidence item not found"})
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, detail={"type": "INVALID_SCHEMA", "message": str(exc)})
+
+# ====================================================================== SILKTRACE replay, DJI triage, sandbox, vehicle KB and behaviour
+from .silktrace.replay import build_replay as _build_silktrace_replay
+from .silktrace.sandbox import inspect_isolated as _inspect_silktrace_isolated
+from .silktrace.knowledge import list_profiles as _silktrace_profiles, validate_profile as _validate_silktrace_profile
+from .silktrace.behavior import analyze as _silktrace_analyze
+
+_SILKTRACE_PROFILE_FILE = _SILKTRACE_ROOT / "vehicle_profiles.json"
+
+def _silktrace_evidence_path(evidence_id: str):
+    rec = _silktrace.get(evidence_id)
+    if not rec:
+        raise HTTPException(404, detail={"type": "NOT_FOUND", "message": "evidence item not found"})
+    return rec, _SILKTRACE_ROOT / "evidence" / evidence_id / rec["stored_filename"]
+
+@app.get("/api/silktrace/evidence/{evidence_id}/replay")
+def silktrace_replay(evidence_id: str, profile_id: str | None = Query(default=None), _=VIEW):
+    rec, source = _silktrace_evidence_path(evidence_id)
+    result = _build_silktrace_replay(rec)
+    if profile_id:
+        try:
+            custom_profiles = json.loads(_SILKTRACE_PROFILE_FILE.read_text(encoding="utf-8")) if _SILKTRACE_PROFILE_FILE.exists() else []
+        except Exception: custom_profiles = []
+        selected_profile = next((x for x in custom_profiles if x.get("id") == profile_id), None)
+        if selected_profile is None:
+            selected_profile = next((x for x in _silktrace_profiles().get("profiles", []) if x.get("id") == profile_id), None)
+        if selected_profile is None:
+            raise HTTPException(404, detail={"type":"VEHICLE_PROFILE_NOT_FOUND","message":"vehicle profile not found"})
+        result["vehicle_profile"] = selected_profile
+    # A user-defined schema decode is a derived artifact; use it only as derived data.
+    derived = source.parent / "derived" / "custom-schema-v1.json"
+    if derived.is_file():
+        try:
+            custom = json.loads(derived.read_text(encoding="utf-8"))
+            derived_rec = {**rec, "inspection": {**rec.get("inspection", {}), "samples": custom.get("samples", []), "channels": custom.get("channels", [])}}
+            result = _build_silktrace_replay(derived_rec)
+            result["source_mode"] = "investigator-defined schema decode"
+        except Exception as exc:
+            result.setdefault("warnings", []).append(f"Derived schema replay unavailable: {type(exc).__name__}")
+    return result
+
+@app.post("/api/silktrace/evidence/{evidence_id}/sandbox-inspect")
+def silktrace_sandbox_inspect(evidence_id: str, _=INVESTIGATE):
+    rec, source = _silktrace_evidence_path(evidence_id)
+    try:
+        parsed = _inspect_silktrace_isolated(source, rec["original_filename"], timeout=18)
+        isolation = parsed.pop("_isolation", "resource-limited subprocess")
+        return {"evidence_id": evidence_id, "isolation": isolation, "parser_execution": "built-in reviewed parsers only", "result": parsed}
+    except Exception as exc:
+        raise HTTPException(422, detail={"type": "ISOLATED_PARSER_FAILED", "message": f"{type(exc).__name__}: {str(exc)[:500]}"})
+
+@app.get("/api/silktrace/vehicles")
+def silktrace_vehicle_profiles(_=VIEW):
+    base = _silktrace_profiles()
+    try:
+        custom = json.loads(_SILKTRACE_PROFILE_FILE.read_text(encoding="utf-8")) if _SILKTRACE_PROFILE_FILE.exists() else []
+    except Exception: custom = []
+    base["custom_profiles"] = custom
+    return base
+
+@app.post("/api/silktrace/vehicles")
+def silktrace_save_vehicle_profile(profile: dict, _=INVESTIGATE):
+    try: normalized = _validate_silktrace_profile(profile)
+    except (ValueError, TypeError) as exc: raise HTTPException(400, detail={"type":"INVALID_VEHICLE_PROFILE","message":str(exc)})
+    try: rows = json.loads(_SILKTRACE_PROFILE_FILE.read_text(encoding="utf-8")) if _SILKTRACE_PROFILE_FILE.exists() else []
+    except Exception: rows = []
+    rows = [r for r in rows if r.get("id") != normalized["id"]]
+    rows.append(normalized); _SILKTRACE_PROFILE_FILE.write_text(json.dumps(rows,indent=2,ensure_ascii=False),encoding="utf-8")
+    return normalized
+
+@app.post("/api/silktrace/evidence/{evidence_id}/behavior")
+def silktrace_behavior(evidence_id: str, _=INVESTIGATE):
+    rec, source = _silktrace_evidence_path(evidence_id)
+    rows = (rec.get("inspection") or {}).get("samples") or []
+    derived = source.parent / "derived" / "custom-schema-v1.json"
+    if derived.is_file():
+        try: rows = json.loads(derived.read_text(encoding="utf-8")).get("samples", rows)
+        except Exception: pass
+    result = _silktrace_analyze(rows)
+    result.update({"evidence_id": evidence_id, "source_sha256": rec["sha256"], "analysis_kind": "screening-only"})
+    return result
 
 # ====================================================================== logs / import
 @app.post("/api/logs/import")
@@ -867,6 +1158,8 @@ async def ws(websocket: WebSocket, channel: str):
     try:
         ws_principal(websocket, r.config)
     except HTTPException:
+        host = websocket.client.host if websocket.client else None
+        record_denied(r, f"anonymous@{host}", "none", f"WS /ws/{channel}", "WS_UNAUTHENTICATED", "operator")
         await websocket.close(code=4401)
         return
     await websocket.accept()

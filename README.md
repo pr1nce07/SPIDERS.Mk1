@@ -150,3 +150,11 @@ Live, replay and offline import all run through the same `Pipeline` class (`back
 * **Screenshots need an open GUI.** They are captured by a connected GUI client (html2canvas), not by the backend.
 * **Tailwind is not used.** The frontend uses its own CSS design system instead.
 * **Thresholds are not tuned against real flights.** Detector thresholds in `configs/default.yaml` are initial values and should be tuned against real SITL and flight traces.
+
+## SILKTRACE — universal drone evidence intake
+
+The SILKTRACE module adds evidence-first intake for known and unknown drone blackbox formats. It stores immutable-by-policy originals, records SHA-256 hashes, performs progressive format inspection, and exposes a dedicated investigator workspace. It is an incremental extension: see [`docs/silktrace/README.md`](docs/silktrace/README.md) for supported formats, API routes, limitations and tests. Unknown-format acceptance is supported; universal semantic decoding is not claimed.
+
+### SILKTRACE advanced analysis
+
+SILKTRACE now includes GPS track replay, attitude-based 3D perspective replay, synchronized sample controls, DJI FlightRecord parsing (via `pydjirecord`), resource-limited isolated parser execution, firmware/log-format knowledge references, custom vehicle profiles, and robust statistical/IsolationForest anomaly screening. See [`docs/silktrace/ADVANCED_CAPABILITIES.md`](docs/silktrace/ADVANCED_CAPABILITIES.md) for limitations and deployment hardening. DJI v13–14 frame decryption requires per-flight DJI keychains; SILKTRACE does not fetch or store keys implicitly.

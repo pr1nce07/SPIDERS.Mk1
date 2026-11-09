@@ -162,6 +162,10 @@ export function ExplanationView({ e }: { e: Explanation | null | undefined }) {
     ["CONFIDENCE", <div className="col gap-s"><span>{e.confidence}</span>{e.contributors?.length ? <Contributors items={e.contributors} /> : null}</div>],
     ["LIMITATIONS", e.limitations?.length ? <ul>{e.limitations.map((x, i) => <li key={i}>{x}</li>)}</ul> : <span className="muted">none recorded</span>],
   ];
+  if (e.independence) rows.push(["INDEPENDENCE", <div className="col gap-s">
+    <span><strong>{e.independence.count}</strong> independent line{e.independence.count === 1 ? "" : "s"} of evidence</span>
+    {e.independence.lines.map((ln, i) => <span key={i} className="mono small">line {i + 1}: {ln.join(" · ")}</span>)}
+  </div>]);
   if (e.state_policy) rows.push(["POLICY", <span className="small dim">{e.state_policy}</span>]);
   return (
     <div className="expl">
@@ -175,7 +179,7 @@ export function ExplanationView({ e }: { e: Explanation | null | undefined }) {
   );
 }
 
-export function Contributors({ items }: { items: { label: string; value: number; basis?: string; source?: string }[] }) {
+export function Contributors({ items }: { items: { label: string; value: number; basis?: string; source?: string; independent?: boolean; lineage?: string[] | null }[] }) {
   const max = Math.max(0.01, ...items.map((c) => c.value));
   return (
     <div className="col gap-s">
@@ -183,7 +187,8 @@ export function Contributors({ items }: { items: { label: string; value: number;
         <div key={i} className="contrib" title={c.basis}>
           <span className="mono" style={{ width: 38, textAlign: "right" }}>+{Math.round(c.value * 100)}</span>
           <span className="bar" style={{ width: `${(c.value / max) * 90}px` }} />
-          <span className="grow">{c.label}{c.source ? <span className="muted small"> · {c.source}</span> : null}</span>
+          <span className="grow">{c.label}{c.source ? <span className="muted small"> · {c.source}</span> : null}
+            {c.independent === false && c.lineage ? <span className="muted small" title="Shares its sensor/data path with a stronger contributor, so it counts at reduced weight"> · corroborates ({c.lineage.join("/")})</span> : null}</span>
         </div>
       ))}
     </div>

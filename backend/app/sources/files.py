@@ -145,6 +145,17 @@ def iter_dataflash(path: Path) -> Iterator[SourceItem]:
             if ev_id in (10, 11):
                 armed = ev_id == 10
             mapped = ("DF_EV", {"event_id": ev_id, "armed": armed if ev_id in (10, 11) else None})
+        elif typ == "PIDW":
+            # Onboard PARAM_SET receive hook (firmware FW-04): sender identity as seen by the autopilot.
+            name = d.get("Name")
+            name = name.decode(errors="ignore") if isinstance(name, (bytes, bytearray)) else name
+            mapped = ("PARAM_SET", {"param_id": str(name or "").rstrip("\x00"), "param_value": d.get("Val"), "param_type": d.get("Typ"),
+                                    "onboard_result": {0: "REQUESTED", 1: "APPLIED", 2: "REJECTED"}.get(d.get("Res"), d.get("Res")),
+                                    "signature": {0: "NONE", 1: "VALID", 2: "INVALID"}.get(d.get("Sig"), d.get("Sig")),
+                                    "channel": d.get("Chan")})
+            yield SourceItem("event", t, {"msg_name": mapped[0], "fields": mapped[1], "origin": typ, "df_fields": d, "raw": raw,
+                                          "sysid": d.get("Sys"), "compid": d.get("Comp")}, source="DATAFLASH")
+            continue
         elif typ == "RCIN":
             mapped = ("RC_CHANNELS_RAW_DF", {k: v for k, v in d.items() if k.startswith("C")})
         if mapped:

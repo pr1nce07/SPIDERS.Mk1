@@ -49,7 +49,7 @@ class CaseCapture:
 
 
 class SnapshotManager:
-    def __init__(self, case_root: Path, config, errors, on_case: Callable[[dict], None] | None = None):
+    def __init__(self, case_root: Path, config, errors, on_case: Callable[[dict], None] | None = None, keystore=None):
         self.root = case_root
         self.config = config
         self.errors = errors
@@ -61,6 +61,7 @@ class SnapshotManager:
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="case-writer")
         self._lock = threading.Lock()
         self.written = 0
+        self.keystore = keystore  # signs sealed cases when set (GAP-12)
 
     # --------------------------------------------------------------- trigger
     def trigger(self, *, incident: Optional[dict], reason: str, t: float, session: dict, frozen: dict,
@@ -161,9 +162,9 @@ class SnapshotManager:
         def add(name: str, data: bytes | str, source: str):
             p = d / name
             p.parent.mkdir(parents=True, exist_ok=True)
-            mode = "wb" if isinstance(data, bytes) else "w"
-            with open(p, mode, **({} if isinstance(data, bytes) else {"encoding": "utf-8"})) as fh:
-                fh.write(data)
+            # Write exact bytes: text mode on Windows would turn "\n" into "\r\n", doubling the
+            # csv module's "\r\n" and making case files differ between platforms.
+            p.write_bytes(data if isinstance(data, bytes) else data.encode("utf-8"))
             artifacts.append({"filename": name, "size": p.stat().st_size, "sha256": sha256_file(p), "created_at": now, "source": source})
 
         def jl(rows) -> str:
@@ -224,9 +225,16 @@ class SnapshotManager:
             "config_snapshot": cap.frozen.get("config", {}),
             "tools": {"gcs_version": GCS_VERSION, "parser_version": PARSER_VERSION, "hash_algorithm": "sha256"},
             "artifacts": artifacts, "revisions": [], "custody_note": CUSTODY_NOTE,
+            "acquisition": {"method": "automatic snapshot (incident trigger)" if cap.incident else "manual snapshot",
+                            "tool": f"SPIDERS.Mk1 GCS {GCS_VERSION}", "source": cap.session.get("kind"),
+                            "clock": "host system clock, UTC; time synchronisation is not verified by SPIDERS",
+                            "evidence_signing": "Ed25519 case.sig.json" if self.keystore else "not enabled"},
+            "custody": [{"at": utc_now_iso(), "event": "ACQUIRED", "by": "SPIDERS GCS (automatic)" if cap.incident else "SPIDERS GCS",
+                         "note": cap.trigger.get("reason")}],
         }
-        (d / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
+        (d / "manifest.json").write_bytes(json.dumps(manifest, indent=2, default=str).encode("utf-8"))
         write_hash_file(d)
+        self._sign(d)
         return {"status": manifest["status"], "manifest_sha256": sha256_file(d / "manifest.json"),
                 "artifacts": len(artifacts) + 2, "manifest": manifest}
 
@@ -315,13 +323,40 @@ Verify: `sha256sum -c hashes.sha256` or VERIFY CASE in the GUI.
             raise FileExistsError(rel_name)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(data)
-        m = json.loads((d / "manifest.json").read_text())
+        m = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
         art = {"filename": rel_name, "size": len(data), "sha256": sha256_file(p), "created_at": utc_now_iso(), "source": source}
         m["artifacts"].append(art)
         m.setdefault("revisions", []).append({"at": art["created_at"], "action": f"added {rel_name}", "previous_manifest_sha256": prev_manifest_sha})
-        (d / "manifest.json").write_text(json.dumps(m, indent=2, default=str))
+        (d / "manifest.json").write_bytes(json.dumps(m, indent=2, default=str).encode("utf-8"))
         write_hash_file(d)
+        self._sign(d)
         return {"artifact": art, "previous_manifest_sha256": prev_manifest_sha, "manifest_sha256": sha256_file(d / "manifest.json")}
+
+    def _sign(self, d: Path) -> None:
+        if self.keystore is None:
+            return
+        from ..security.evidence import sign_case
+        sign_case(d, self.keystore.signing_key("evidence"))
+
+    def add_custody_event(self, case_id: str, event: str, actor: str, to: str = "", note: str = "") -> dict:
+        """Record a custody transfer/receipt/export as a new manifest revision; evidence files are untouched."""
+        if event not in ("TRANSFERRED", "RECEIVED", "EXPORTED", "REVIEWED", "SEALED_COPY_MADE"):
+            raise ValueError("unknown custody event")
+        d = self.root / case_id
+        if not (d / "manifest.json").exists():
+            raise FileNotFoundError(case_id)
+        pre = verify_case(d)
+        if pre["status"] != "VALID":
+            raise ValueError(f"case integrity is {pre['status']}; custody cannot be recorded on a non-VALID case")
+        prev_manifest_sha = sha256_file(d / "manifest.json")
+        m = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+        rec = {"at": utc_now_iso(), "event": event, "by": actor, "to": to[:200], "note": note[:500]}
+        m.setdefault("custody", []).append(rec)
+        m.setdefault("revisions", []).append({"at": rec["at"], "action": f"custody {event}", "previous_manifest_sha256": prev_manifest_sha})
+        (d / "manifest.json").write_bytes(json.dumps(m, indent=2, default=str).encode("utf-8"))
+        write_hash_file(d)
+        self._sign(d)
+        return {"custody": rec, "previous_manifest_sha256": prev_manifest_sha, "manifest_sha256": sha256_file(d / "manifest.json")}
 
     def export_zip(self, case_id: str) -> Path:
         d = self.root / case_id

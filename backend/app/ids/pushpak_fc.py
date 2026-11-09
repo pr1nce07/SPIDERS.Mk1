@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ..mavlink.pushpak import LUA_CONFIRM_THRESHOLD, LUA_SCRIPT_FOR_DETECTOR, PIDS_DETECTORS, StatusTextAssembler, parse_statustext
+from ..mavlink.pushpak import (LUA_CONFIRM_THRESHOLD, LUA_SCRIPT_FOR_DETECTOR, PIDS_DETECTORS, EventDeliveryTracker,
+                               StatusTextAssembler, parse_statustext)
 from ..models.events import TelemetryEvent
 from .base import AnalysisContext, Detector
 
@@ -21,7 +22,8 @@ class PushpakFCDetector(Detector):
     detector_id = "PUSHPAK_FC"
     name = "PUSHPAK FC / Lua"
     domain = "PUSHPAK"
-    data_sources = ("STATUSTEXT",)
+    # STATUSTEXT live; DF_PIDS/PIDH/PIDF from imported DataFlash logs once the firmware writes them (FW-03)
+    data_sources = ("STATUSTEXT", "DF_PIDS", "DF_PIDH", "DF_PIDF")
     methods = ("PIDS STATUSTEXT adapter", "Lua confirmation adapter", "Lua runtime-error health")
     description = "Normalises FC (PIDS) and Lua confirmation STATUSTEXT into detector states; tracks Lua script health."
     limitations = ("On the supplied firmware build the Lua `ids` binding lacks the accessor methods the scripts call "
@@ -37,10 +39,13 @@ class PushpakFCDetector(Detector):
         self.unparsed = 0
         self.assembler = StatusTextAssembler()
         self.chunk_idx: dict = {}
+        self.delivery = EventDeliveryTracker()
 
     def process(self, ev: TelemetryEvent, ctx: AnalysisContext):
         if ev.sysid != ctx.vehicle_sysid:
             return []
+        if ev.msg_name.startswith("DF_PID"):
+            return self._dataflash(ev, ctx)
         key = (ev.sysid, ev.compid, ev.fields.get("id") or 0)
         self.chunk_idx.setdefault(key, []).append(ev.idx)
         text, _chunks = self.assembler.push(ev.sysid, ev.compid, ev.fields, ctx.mono)
@@ -58,12 +63,16 @@ class PushpakFCDetector(Detector):
         self.records.append(rec)
         del self.records[:-500]
         kind = rec["kind"]
-        if kind in ("BRIDGE", "FC_EVENT"):
+        if kind in ("BRIDGE", "FC_EVENT", "STATEMAP", "SYNC"):
             self.bridge = rec
             self.lua_health["ids_gcs_bridge.lua"] = {"status": "RUNNING", "last": ctx.t, "message": rec["original"]}
-            return []
+            return self._delivery(rec, ctx, ev, refs)
         if kind == "PIDS" and rec.get("origin") == "LUA":
             # per-script Lua result (fixed scripts publish PIDS with origin LUA)
+            sm = self.delivery.state_map
+            if sm is not None and rec["state_raw"] in sm:
+                # Lua scripts announced their own state numbering (bridge STATEMAP); use it.
+                rec["state"], rec["state_map_verified"] = sm[rec["state_raw"]], True
             det = rec["detector"]
             script = LUA_SCRIPT_FOR_DETECTOR.get(det)
             if script:
@@ -87,6 +96,8 @@ class PushpakFCDetector(Detector):
                                 evidence=[f"original STATUSTEXT: {rec['original']}"])]
         if kind == "PIDS":
             det = rec["detector"]
+            if rec.get("boot_id") is not None and rec.get("seq") is not None and self.delivery.on_native_event(rec["boot_id"], rec["seq"]):
+                return []  # same AP_IDS event already processed
             prev = self.fc.get(det)
             self.fc[det] = rec
             ctx.fc_states[det] = rec
@@ -139,6 +150,74 @@ class PushpakFCDetector(Detector):
         self.unparsed += 1
         return []
 
+    def _dataflash(self, ev, ctx) -> list:
+        """Onboard AP_IDS DataFlash records (firmware FW-03): same meaning as the PIDS STATUSTEXT, but durable."""
+        f = ev.fields
+        self.mark_data(ctx)
+        if ev.msg_name == "DF_PIDS":
+            det_i = int(f.get("Det", -1))
+            det = PIDS_DETECTORS[det_i] if 0 <= det_i < len(PIDS_DETECTORS) else f"UNKNOWN({det_i})"
+            text = (f"PIDS|2|FC|{det}|{int(f.get('St', 0))}|{float(f.get('Conf', 0)):.3f}|{int(f.get('Ev', 0))}|"
+                    f"{float(f.get('Met', 0)):.2f}|{int(f.get('Inst', 0))}|{int(f.get('Boot', 0))}|{int(f.get('Seq', 0))}")
+            ev.fields = {"text": text, "severity": None, "dataflash": dict(f)}
+            ev.msg_name = "STATUSTEXT"
+            try:
+                return self.process(ev, ctx)
+            finally:
+                ev.msg_name = "DF_PIDS"
+                ev.fields = f
+        if ev.msg_name == "DF_PIDH":
+            out = []
+            q, lg = int(f.get("QDrop", 0)), int(f.get("LogDrop", 0))
+            last = getattr(self, "_pidh", {"QDrop": 0, "LogDrop": 0})
+            if q > last["QDrop"] or lg > last["LogDrop"]:
+                out.append(self.result(ctx, "OBSERVED", f"AP_IDS event loss on board: ring dropped {q}, log dropped {lg}", kind="health",
+                                       severity="MEDIUM", ev=ev, source="FC", domain="PUSHPAK", method="DataFlash PIDH counters",
+                                       inputs=dict(f), why="The native IDS reports events it could not queue or log; they are lost, not hidden."))
+            self._pidh = {"QDrop": q, "LogDrop": lg}
+            self.delivery.ring_dropped = max(self.delivery.ring_dropped, q)
+            return out
+        return [self.result(ctx, "OBSERVED", f"AP_IDS fault code {f.get('Code')} (subsystem {f.get('Sub')})", kind="health",
+                            severity="MEDIUM", ev=ev, source="FC", domain="PUSHPAK", method="DataFlash PIDF fault record",
+                            inputs=dict(f), why="The native IDS recorded an internal fault and its recovery state.")]
+
+    def _delivery(self, rec: dict, ctx, ev, refs) -> list:
+        """Bridge protocol v2 bookkeeping: reboots, missed/duplicate events (GAP-07)."""
+        d, kind = self.delivery, rec["kind"]
+        if kind == "BRIDGE":
+            d.on_bridge(rec)
+            return []
+        if kind == "STATEMAP":
+            d.on_statemap(rec)
+            if d.state_map_matches_assumed is False:
+                return [self.result(ctx, "OBSERVED", "Bridge state map differs from GCS assumption", kind="health", severity="MEDIUM",
+                                    ev=ev, refs=refs, source="LUA", domain="PUSHPAK", method="bridge STATEMAP",
+                                    inputs={"announced": d.state_map}, why="Lua PIDS states are decoded with the announced map.")]
+            return []
+        if kind == "SYNC":
+            r = d.on_sync(rec)
+            out = []
+            if r["new_ring_drops"]:
+                out.append(self.result(ctx, "OBSERVED", f"AP_IDS event ring overflow: {r['new_ring_drops']} event(s) dropped on board",
+                                       kind="health", severity="MEDIUM", ev=ev, refs=refs, source="LUA", domain="PUSHPAK",
+                                       method="bridge SYNC drop counter", inputs=d.status(),
+                                       why="The native IDS overwrote events before they were reported; check DataFlash PIDS records."))
+            if r["reboot"]:
+                out.append(self.result(ctx, "OBSERVED", "Flight controller reboot detected (bridge uptime reset)", kind="observation",
+                                       severity="HIGH" if ctx.airborne else "MEDIUM", ev=ev, refs=refs, source="LUA",
+                                       domain="PUSHPAK", method="bridge SYNC uptime", inputs={"uptime_s": rec["uptime_s"],
+                                       "boot_epoch": d.boot_epoch}, why="SYNC uptime went backwards; event sequence numbering restarted."))
+            if r["new_missing"]:
+                out.append(self.result(ctx, "OBSERVED", f"PUSHPAK event delivery gap: {r['new_missing']} FC_EVENT line(s) missed",
+                                       kind="health", severity="MEDIUM", ev=ev, refs=refs, source="LUA", domain="PUSHPAK",
+                                       method="bridge SYNC count vs received", inputs=d.status(),
+                                       why=f"The bridge reports {rec['events_sent']} FC_EVENT lines this boot; this GCS received "
+                                           f"{d.received} after its first SYNC baseline. Recover the events from onboard logs.",
+                                       limitations=["One-way telemetry: missing lines cannot be re-requested over MAVLink."]))
+            return out
+        d.on_fc_event(rec)  # duplicates are counted and ignored; FC_EVENT itself never opens incidents
+        return []
+
     @staticmethod
     def _inputs(rec: dict) -> dict:
         d = {k: rec.get(k) for k in ("detector", "state", "state_raw", "confidence", "class", "metric", "instance", "script") if rec.get(k) is not None}
@@ -150,9 +229,11 @@ class PushpakFCDetector(Detector):
 
     def tick(self, ctx):
         self.metrics = {"fc_detectors_reporting": sorted(self.fc), "lua_detectors_reporting": sorted(self.lua),
-                        "lua_scripts": self.lua_health, "records": len(self.records), "unparsed_lua": self.unparsed}
+                        "lua_scripts": self.lua_health, "records": len(self.records), "unparsed_lua": self.unparsed,
+                        "event_delivery": self.delivery.status()}
         return []
 
     def table(self) -> dict:
         return {"fc": self.fc, "lua": self.lua, "lua_health": self.lua_health, "known_detectors": PIDS_DETECTORS,
+                "event_delivery": self.delivery.status(),
                 "recent": self.records[-100:]}

@@ -27,6 +27,7 @@ class AuditLog:
             row = conn.execute(select(audit_log.c.seq, audit_log.c.hash).order_by(audit_log.c.seq.desc()).limit(1)).first()
         self._seq = row.seq if row else 0
         self._prev = row.hash if row else GENESIS
+        self.on_record = None  # optional callback(entry) after each append (signed checkpoints)
 
     @staticmethod
     def _digest(entry: dict) -> str:
@@ -51,6 +52,8 @@ class AuditLog:
             self._prev = entry["hash"]
         out = dict(entry)
         out["detail"] = detail or {}
+        if self.on_record is not None:
+            self.on_record(out)
         return out
 
     def list(self, limit: int = 500) -> list[dict]:
@@ -62,6 +65,11 @@ class AuditLog:
             d["detail"] = loads(d["detail"]) or {}
             out.append(d)
         return out
+
+    def hash_at(self, seq: int):
+        with self.engine.connect() as conn:
+            row = conn.execute(select(audit_log.c.hash).where(audit_log.c.seq == seq)).first()
+        return row.hash if row else None
 
     def verify(self) -> dict:
         prev = GENESIS
