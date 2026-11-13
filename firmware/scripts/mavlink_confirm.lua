@@ -4,7 +4,7 @@
 -- Lua cannot see individual MAVLink packets on this build (no packet/sequence
 -- binding and no ids:mavlink_* accessors). Packet-level sequence/source/signing
 -- evidence is therefore left to the native MAVLinkDetector and the GCS. This
--- script confirms link-level behaviour from gcs:sysid_mygcs_last_seen_time_ms():
+-- script confirms link-level behaviour from gcs:last_seen():
 --   * GCS heartbeat gap                        -> RATE
 --   * gap persisting > 10 s                    -> PERSISTENCE (set by tracker)
 --   * repeated loss/recovery (intermittent)    -> SEQUENCE
@@ -21,7 +21,7 @@ local GAP_MS = 3000
 
 local function update()
     local now = common.now_ms()
-    local last = common.to_number(gcs:sysid_mygcs_last_seen_time_ms())
+    local last = common.to_number(gcs:last_seen())
     if last == 0 then
         return update, 1000  -- configured GCS never seen yet: nothing to judge
     end

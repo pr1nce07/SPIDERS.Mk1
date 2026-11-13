@@ -61,7 +61,7 @@ ins = strict("ins", {get_accel=function(_, i) return vec(0 + (i==1 and W.acc_off
   get_accel_health=function() return true end, get_gyro_health=function() return true end,
   accels_consistent=function() return W.acc_off < 3 end, gyros_consistent=function() return W.gyr_off < 0.15 end})
 gcs = strict("gcs", {send_text=function(_, sev, t) W.texts[#W.texts+1] = t end,
-  sysid_mygcs_last_seen_time_ms=function() return u32(W.gcs_last) end})
+  last_seen=function() return u32(W.gcs_last) end})  -- Lua name of GCS::sysid_mygcs_last_seen_time_ms (bindings.desc rename)
 rc = strict("rc", {has_valid_input=function() return W.rc_valid end})
 vehicle = strict("vehicle", {get_mode=function() return W.mode end, get_likely_flying=function() return W.flying end,
   get_control_mode_reason=function() return W.reason end,

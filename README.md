@@ -35,8 +35,6 @@ Push-Location backend
 # Terminal 2
 Push-Location frontend
 npm run dev  # open the URL printed by Vite
-# Terminal 2 (if disc is partitioned)
-npm.cmd run dev # open the URL printed by Vite
 ```
 
 ### macOS / Linux
@@ -90,6 +88,9 @@ A third build also exists, a 14 Oct 2026 patch build (APJ `3fab3632…`). It dri
 
 The gps_confirm.lua report is 81 characters, which is longer than a single 50-character STATUSTEXT. It therefore arrives chunked, and the GCS reassembles it using `id`/`chunk_seq`.
 
+## GNSS integrity physics engine (FW-13)
+`firmware/native/` holds a native C++ GNSS integrity monitor for the AP_IDS GPS detector. It compares each GNSS fix with an IMU-only prediction that GNSS cannot correct during 2/5/15/30/60 s horizons. The portable engine is host-tested and cross-compiles for the Pixhawk 6C's Cortex-M7. The ArduPilot adapter is a template that has to be verified and built in the AP_IDS fork. The GCS already decodes its `IDSG`/`IDSR` DataFlash records and shows them on the IDS page. See `firmware/native/README.md`; nothing has been validated on hardware yet.
+
 ## Lua scripts
 `firmware/scripts/` (packaged as `firmware/ROMFS_custom_fixed.zip`) is the current version of the PUSHPAK Lua scripts. They call only `ids:report_confirmed()` and `ids:event_sequence()`, so they run on every PUSHPAK build. See `firmware/README.md`. They are verified under Lua 5.4 against strict binding mocks by `backend/tests/test_lua_scripts.py`. The GCS parses their `PIDS|1|LUA|…` output and the bridge's `BRIDGE`, `STATEMAP`, `SYNC` and `FC_EVENT` lines (bridge protocol v2).
 
@@ -111,7 +112,7 @@ Live, replay and offline import all run through the same `Pipeline` class (`back
 * GPS_INTEGRITY: rules, MAD robust z-score, EWMA, CUSUM, jump detection, GPS↔EKF residuals, EKF innovations, quality mismatch, persistence
 * COMMAND, PARAMETER, MISSION (SHA-256 fingerprint), RC_LINK, IMU_CONSISTENCY, OFFBOARD
 * BATTERY, FLIGHT_MODE, SENSOR_HEALTH
-* PUSHPAK_FC (PIDS, Lua confirmations, Lua errors, bridge delivery tracking)
+* PUSHPAK_FC (PIDS, Lua confirmations, Lua errors, bridge delivery tracking, DataFlash IDSG/IDSR from the onboard GNSS integrity engine)
 * BASELINE (signed, engineer-approved parameter/mission baseline; reports `BASELINE_MISMATCH`)
 * ML_BASELINE (Isolation Forest, from an approved profile or an untrusted session baseline). This is supplementary only and never opens an incident on its own.
 

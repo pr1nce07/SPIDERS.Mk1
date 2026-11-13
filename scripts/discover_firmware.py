@@ -94,6 +94,11 @@ def main() -> int:
 
     ap_ids_objs = sorted(Path(n).name for n in names if "/libraries/AP_IDS/" in n and n.endswith(".o"))
     fact("ap_ids.compiled_objects", ap_ids_objs, "object files under build/Pixhawk6C/libraries/AP_IDS/")
+    # FW-13: GNSSIntegrity physics engine (firmware/native/AP_IDS/GNSSIntegrity). Absent in builds up to build_v3.
+    gi_objs = sorted(Path(n).name for n in names if "/libraries/AP_IDS/" in n and n.endswith(".o")
+                     and ("GNSSIntegrity" in n or Path(n).stem in ("InertialPropagator", "HorizonManager", "HeadingManager")))
+    fact("ap_ids.gnss_integrity_objects", gi_objs,
+         "AP_IDS GNSSIntegrity/ object files; IDSG/IDSR then also appear in dataflash.ids_log_messages")
 
     # Lua binding methods for the `ids` singleton: generated binding functions AP_IDS_<method>
     bind = sorted({m.group(1) for s in elf_strings for m in [re.match(r"_ZL\d+AP_IDS_([a-z_]+)P9lua_State", s)] if m and m.group(1) not in ("index",)})

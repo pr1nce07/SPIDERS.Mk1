@@ -8,7 +8,7 @@ import { go, openDrawer } from "../lib/nav";
 import Chart, { type Series } from "../charts/Chart";
 import { Badge, Confidence, Empty, PageTitle, Panel, State } from "../components/ui";
 import { time } from "../lib/format";
-import type { Incident } from "../types";
+import type { GnssIntegrity, Incident } from "../types";
 
 export function Comparison() {
   const ids = useLive((s) => s.ids);
@@ -39,6 +39,7 @@ export function Comparison() {
       </div>
       <div className="small muted">{c.jamming}</div>
       {c.event_delivery && <EventDelivery d={c.event_delivery} />}
+      {c.gnss_integrity && <GnssIntegrityPanel g={c.gnss_integrity} />}
       {Object.keys(c.lua_health || {}).length > 0 && (
         <div>
           <div className="small muted mb">LUA SCRIPT HEALTH (from ArduPilot scripting STATUSTEXT)</div>
@@ -67,6 +68,52 @@ function EventDelivery({ d }: { d: any }) {
         <span className="muted">duplicates ignored {d.duplicates_ignored}</span>
       </div>
       <div className="small muted">{d.delivery_model}</div>
+    </div>
+  );
+}
+
+// FW-13: onboard GNSSIntegrity engine (GNSS vs an IMU-only prediction), from DataFlash IDSG/IDSR.
+const GI_FLAGS_SHOWN = ["HEADING_VALID", "BIAS_VALID", "TRUST_GATE_OPEN", "GRAVITY_FAULT", "IMU_GAP", "IMU_OVERFLOW",
+  "ACCEL_CLIPPING", "HIGH_VIBRATION", "FIX_UNALIGNABLE", "BARO_WARN", "GROUND_WARN", "HEADING_DISTURBED",
+  "RESEED_REQUIRED", "ALARM_LATCHED", "CLEAR_BLOCKED"];
+const num = (v: number | undefined, d = 1) => (v == null ? "—" : v.toFixed(d));
+
+function GnssIntegrityPanel({ g }: { g: GnssIntegrity }) {
+  const suspicious = g.state === "WARNING" || g.state === "ALARM";
+  return (
+    <div className={`notice ${suspicious ? "warn" : ""}`}>
+      <div className="row wrap gap-s small">
+        <strong>FC GNSS INTEGRITY (IMU-only prediction)</strong>
+        <State s={g.state} />
+        <span className="mono">conf {Math.round(g.confidence * 100)}%</span>
+        <span className="muted">IDSG seq {g.seq} · fix age {g.fix_age_ms} ms · lag applied {g.applied_lag_ms} ms</span>
+        <span className="muted">bias |b| {num(g.accel_bias_norm_mps2, 3)} m/s² · Δspeed {num(g.delta_speed_residual_mps, 2)} m/s · baro Δh {num(g.baro_residual_m, 1)} m</span>
+      </div>
+      <div className="row wrap gap-s small mb">
+        {g.flags.filter((f) => GI_FLAGS_SHOWN.includes(f)).map((f) => (
+          <Badge key={f} v={f.replace(/_/g, " ")} tone={["HEADING_VALID", "BIAS_VALID", "TRUST_GATE_OPEN"].includes(f) ? "ok" : "warn"} />
+        ))}
+      </div>
+      <div className="scroll">
+        <table className="tbl">
+          <thead><tr><th>Horizon</th><th>Status</th><th>Elapsed</th><th>|r_p| m (D²)</th><th>|r_v| m/s (D²)</th><th>Δspeed D²</th><th>σp / σv</th><th>Reason</th></tr></thead>
+          <tbody>
+            {g.horizons.map((h) => (
+              <tr key={h.index}>
+                <td><strong>{h.duration_s} s</strong></td>
+                <td><span className="row gap-s">{h.alarm ? <State s="ALARM" /> : h.warn ? <State s="WARNING" /> : h.valid ? <State s="VALID" /> : h.armed ? <State s="DEGRADED" /> : <span className="muted">{h.expired ? "expired" : "idle"}</span>}{h.extended && <Badge v="extended" tone="warn" />}{h.heading_free_only && <Badge v="heading-free" tone="info" />}</span></td>
+                <td className="mono">{num(h.elapsed_s)}</td>
+                <td className="mono">{num(h.position_residual_m)} ({num(h.position_test)})</td>
+                <td className="mono">{num(h.velocity_residual_mps, 2)} ({num(h.velocity_test)})</td>
+                <td className="mono">{num(h.delta_speed_test)}</td>
+                <td className="mono">{num(h.position_sigma_m)} / {num(h.velocity_sigma_mps, 2)}</td>
+                <td className="muted small">{h.reason}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="small muted">Horizons share IMU and GNSS data: they are not independent witnesses. DEGRADED means the prediction cannot support a test; it is never reported as spoofing.</div>
     </div>
   );
 }

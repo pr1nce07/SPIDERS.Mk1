@@ -15,13 +15,15 @@ from app.lua_runtime import HARNESS  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 FIXED = ROOT / "firmware" / "scripts"
 
-# Methods verified in the ELF symbol table (_ZL..<Class>_<method>P9lua_State)
+# Methods verified in the ELF symbol table (_ZL..<Class>_<method>P9lua_State).
+# The symbol carries the C++ method name; where bindings.desc renames a method,
+# list the Lua name scripts must call (GCS sysid_mygcs_last_seen_time_ms -> last_seen).
 ALLOWED = {
     "ids": ["report_confirmed", "event_sequence"],
     "gps": ["primary_sensor", "status", "location", "velocity", "horizontal_accuracy", "num_sats", "get_hdop", "num_sensors"],
     "ahrs": ["get_location", "get_velocity_NED", "get_variances"],
     "ins": ["get_accel", "get_gyro", "get_accel_health", "get_gyro_health", "accels_consistent", "gyros_consistent"],
-    "gcs": ["send_text", "sysid_mygcs_last_seen_time_ms"],
+    "gcs": ["send_text", "last_seen"],
     "rc": ["has_valid_input"],
     "vehicle": ["get_mode", "get_likely_flying", "get_control_mode_reason", "get_target_location"],
     "arming": ["is_armed"],
@@ -143,6 +145,22 @@ def test_parameter_change_while_armed():
     s.W.params["FENCE_ENABLE"] = 0.0
     s.W.params["ARMING_CHECK"] = 0.0
     s.W.params["WPNAV_SPEED"] = 2000.0
+    s.run(3)
+    assert s.confirmed("PARAMETER")
+
+
+def test_parameter_change_while_armed_47_names():
+    # ArduCopter 4.7.1 has only the renamed parameters (checked against the SITL parameter list):
+    # ARMING_CHECK -> ARMING_SKIPCHK, RTL_ALT -> RTL_ALT_M, WPNAV_SPEED -> WP_SPD, ANGLE_MAX -> ATC_ANGLE_MAX.
+    s = Script("parameter_confirm.lua")
+    for old in ("FENCE_ENABLE", "ARMING_CHECK", "RTL_ALT", "WPNAV_SPEED"):
+        s.W.params[old] = None
+    for k, v in {"ARMING_SKIPCHK": 0.0, "RTL_ALT_M": 15.0, "WP_SPD": 8.0, "ATC_ANGLE_MAX": 30.0}.items():
+        s.W.params[k] = v
+    s.run(3)
+    s.W.params["ARMING_SKIPCHK"] = 1.0
+    s.W.params["WP_SPD"] = 20.0
+    s.W.params["ATC_ANGLE_MAX"] = 70.0
     s.run(3)
     assert s.confirmed("PARAMETER")
 

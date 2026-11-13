@@ -30,7 +30,7 @@ local function update()
     local armed = arming:is_armed()
     local flying = vehicle:get_likely_flying()
     local reason = vehicle:get_control_mode_reason()
-    local gcs_last = common.to_number(gcs:sysid_mygcs_last_seen_time_ms())
+    local gcs_last = common.to_number(gcs:last_seen())
     local gcs_silent = gcs_last == 0 or (now - gcs_last) > 3000
 
     local evidence = 0

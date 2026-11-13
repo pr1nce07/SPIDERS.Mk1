@@ -28,12 +28,80 @@ PIDS_DETECTORS = ["GPS", "MAVLINK", "COMMAND", "RC_LINK", "IMU", "MISSION", "PAR
 PIDS_STATE_MAP = {0: "CLEAR", 1: "SUSPECTED", 2: "CONFIRMED"}
 PIDS_STATE_MAP_VERIFIED = False
 
-# Evidence bits as named by the Lua scripts' EVID_* constants.
+# Evidence bits as named by the Lua scripts' EVID_* constants, plus the two bits the
+# native GPS detector adds when the GNSSIntegrity physics engine contributes (FW-13,
+# firmware/native/AP_IDS/GNSSIntegrity/GNSSIntegrityLog.h). Keep both sides in step.
 EVIDENCE_BITS = {
     1: "PERSISTENCE", 2: "ROBUST", 8: "CUSUM", 16: "CROSS", 32: "KINEMATIC",
     128: "SOURCE", 256: "SEQUENCE", 512: "CONTEXT", 1024: "RATE", 2048: "INTEGRITY",
+    4096: "INS_PREDICTION", 8192: "PHYS_CONSTRAINT",
     16384: "DEGRADED",
 }
+
+# ------------------------------------------------------------------ FW-13 GNSSIntegrity records
+# DataFlash IDSG (summary) / IDSR (one row per horizon). The contract is pinned by
+# firmware/native/AP_IDS/GNSSIntegrity/GNSSIntegrityLog.h and tests/test_firmware_contract.py.
+IDSG_FORMAT = "QIIBBBBBBIHhffff"
+IDSG_LABELS = "TimeUS,Boot,Seq,Ver,St,AM,VM,WM,XM,Fl,FAge,Lag,Conf,DvR,BrR,BiN"
+IDSR_FORMAT = "QIIBBBBfffffffff"
+IDSR_LABELS = "TimeUS,Boot,Seq,H,Dur,St,Rsn,El,RP,RV,TP,TV,TD,SP,SV,YSd"
+IDSG_VERSION = 1
+GNSSINT_HORIZONS_S = (2, 5, 15, 30, 60)
+GNSSINT_STATES = {0: "DISABLED", 1: "INITIALIZING", 2: "NO_TRUSTED_SEED", 3: "HEADING_UNOBSERVABLE",
+                  4: "VALID", 5: "DEGRADED", 6: "WARNING", 7: "ALARM"}
+GNSSINT_FLAGS = {
+    0: "TRUSTED_SEED", 1: "HEADING_VALID", 2: "BIAS_VALID", 3: "GROUND_TEST_VALID", 4: "BARO_TEST_VALID",
+    5: "TRUST_GATE_OPEN", 6: "IMU_GAP", 7: "IMU_OVERFLOW", 8: "IMU_DUPLICATE", 9: "ACCEL_CLIPPING",
+    10: "HIGH_VIBRATION", 11: "FIX_UNALIGNABLE", 12: "GRAVITY_FAULT", 13: "GROUND_WARN", 14: "BARO_WARN",
+    15: "BIAS_CHANGE_POINT", 16: "NED_FIXED_PREFERRED", 17: "HEADING_DISTURBED", 18: "RESEED_REQUIRED",
+    19: "SEED_REJECTED", 20: "ORIGIN_RESET", 21: "ALARM_LATCHED", 22: "CLEAR_BLOCKED",
+}
+GNSSINT_HSTAT = {0: "ARMED", 1: "VALID", 2: "EXPIRED", 3: "WARN", 4: "ALARM", 5: "HEADING_FREE_ONLY",
+                 6: "BARO_VALID", 7: "EXTENDED"}
+GNSSINT_REASONS = {0: "NONE", 1: "NOT_ARMED", 2: "IMU_GAP", 3: "IMU_OVERFLOW", 4: "ACCEL_CLIPPING",
+                   5: "POS_SIGMA_LIMIT", 6: "VEL_SIGMA_LIMIT", 7: "HEADING_INVALID", 8: "ATTITUDE_INVALID",
+                   9: "HEADING_EPOCH_CHANGED", 10: "ORIGIN_RESET", 11: "EXPIRED"}
+
+
+def _bits(value: int, names: dict[int, str], width: int) -> list[str]:
+    return [names.get(b, f"BIT{b}") for b in range(width) if value & (1 << b)]
+
+
+def _mask_horizons(mask: int) -> list[int]:
+    return [d for i, d in enumerate(GNSSINT_HORIZONS_S) if mask & (1 << i)]
+
+
+def decode_idsg(f: dict) -> dict:
+    """Normalise one IDSG summary record. Values stay as the FC reported them."""
+    st = int(f.get("St", 0))
+    fl = int(f.get("Fl", 0))
+    am, vm, wm, xm = (int(f.get(k, 0)) for k in ("AM", "VM", "WM", "XM"))
+    return {"boot": int(f.get("Boot", 0)), "seq": int(f.get("Seq", 0)), "version": int(f.get("Ver", 0)),
+            "time_us": int(f.get("TimeUS", 0)), "state_raw": st, "state": GNSSINT_STATES.get(st, f"UNKNOWN({st})"),
+            "armed": _mask_horizons(am), "valid": _mask_horizons(vm), "warn": _mask_horizons(wm), "alarm": _mask_horizons(xm),
+            "masks": {"armed": am, "valid": vm, "warn": wm, "alarm": xm},
+            "flags_raw": fl, "flags": _bits(fl, GNSSINT_FLAGS, 32),
+            "fix_age_ms": int(f.get("FAge", 0)), "applied_lag_ms": int(f.get("Lag", 0)),
+            "confidence": float(f.get("Conf", 0.0)), "delta_speed_residual_mps": float(f.get("DvR", 0.0)),
+            "baro_residual_m": float(f.get("BrR", 0.0)), "accel_bias_norm_mps2": float(f.get("BiN", 0.0)),
+            "version_supported": int(f.get("Ver", 0)) == IDSG_VERSION}
+
+
+def decode_idsr(f: dict) -> dict:
+    """Normalise one IDSR per-horizon record."""
+    h = int(f.get("H", 0))
+    st = int(f.get("St", 0))
+    rsn = int(f.get("Rsn", 0))
+    return {"index": h, "duration_s": int(f.get("Dur", GNSSINT_HORIZONS_S[h] if 0 <= h < 5 else 0)),
+            "status": _bits(st, GNSSINT_HSTAT, 8), "status_raw": st,
+            "armed": bool(st & 1), "valid": bool(st & 2), "expired": bool(st & 4), "warn": bool(st & 8),
+            "alarm": bool(st & 16), "heading_free_only": bool(st & 32), "extended": bool(st & 128),
+            "reason": GNSSINT_REASONS.get(rsn, f"UNKNOWN({rsn})"),
+            "elapsed_s": float(f.get("El", 0.0)), "position_residual_m": float(f.get("RP", 0.0)),
+            "velocity_residual_mps": float(f.get("RV", 0.0)), "position_test": float(f.get("TP", 0.0)),
+            "velocity_test": float(f.get("TV", 0.0)), "delta_speed_test": float(f.get("TD", 0.0)),
+            "position_sigma_m": float(f.get("SP", 0.0)), "velocity_sigma_mps": float(f.get("SV", 0.0)),
+            "yaw_sigma_rad": float(f.get("YSd", 0.0))}
 
 # Lua classification string → PUSHPAK detector family (from each *_confirm.lua).
 LUA_CLASS_TO_DETECTOR = {

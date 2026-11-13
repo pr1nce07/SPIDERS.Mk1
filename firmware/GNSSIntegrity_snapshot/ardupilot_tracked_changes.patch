@@ -1,0 +1,155 @@
+diff --git a/ArduCopter/Copter.cpp b/ArduCopter/Copter.cpp
+index 3b8f390..28cf738 100644
+--- a/ArduCopter/Copter.cpp
++++ b/ArduCopter/Copter.cpp
+@@ -113,6 +113,9 @@ SCHED_TASK_CLASS arguments:
+ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
+     // update INS immediately to get current gyro data populated
+     FAST_TASK_CLASS(AP_InertialSensor, &copter.ins, update),
++#if AP_IDS_GNSSINT_ENABLED
++    FAST_TASK(capture_ids_imu_sample),
++#endif
+     // run low level rate controllers that only require IMU data
+     FAST_TASK(run_rate_controller_main),
+ #if AC_CUSTOMCONTROL_MULTI_ENABLED
+@@ -154,6 +157,9 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
+     SCHED_TASK(fence_check,           25,    100,  7),
+ #endif
+     SCHED_TASK_CLASS(AP_GPS,               &copter.gps,                 update,          50, 200,   9),
++#if AP_IDS_GNSSINT_ENABLED
++    SCHED_TASK(update_ids_gnss_observation, 50, 150, 9),
++#endif
+ #if AP_OPTICALFLOW_ENABLED
+     SCHED_TASK_CLASS(AP_OpticalFlow,          &copter.optflow,             update,         200, 160,  12),
+ #endif
+@@ -258,6 +264,9 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
+ #if HAL_BUTTON_ENABLED
+     SCHED_TASK_CLASS(AP_Button,            &copter.button,              update,           5, 100, 168),
+ #endif
++#if AP_IDS_ENABLED
++    SCHED_TASK(update_ids,              5,    500, 170),
++#endif
+ #if AP_INERTIALSENSOR_FAST_SAMPLE_WINDOW_ENABLED
+     // don't delete this, there is an equivalent (virtual) in AP_Vehicle for the non-rate loop case
+     SCHED_TASK(update_dynamic_notch_at_specified_rate_main,                       LOOP_RATE, 200, 215),
+@@ -273,6 +282,26 @@ void Copter::get_scheduler_tasks(const AP_Scheduler::Task *&tasks,
+     log_bit = MASK_LOG_PM;
+ }
+ 
++#if AP_IDS_ENABLED
++void Copter::update_ids()
++{
++    ids.update();
++}
++#endif
++
++#if AP_IDS_GNSSINT_ENABLED
++void Copter::capture_ids_imu_sample()
++{
++    ids.gnss_integrity.capture_imu_sample();
++}
++
++void Copter::update_ids_gnss_observation()
++{
++    ids.gnss_integrity.set_landed(true, ap.land_complete);
++    ids.gnss_integrity.update_observations();
++}
++#endif
++
+ constexpr int8_t Copter::_failsafe_priorities[7];
+ 
+ 
+diff --git a/ArduCopter/Copter.h b/ArduCopter/Copter.h
+index 90bee85..c42b92d 100644
+--- a/ArduCopter/Copter.h
++++ b/ArduCopter/Copter.h
+@@ -73,6 +73,7 @@
+ #include <AP_Winch/AP_Winch_config.h>
+ #include <AP_SurfaceDistance/AP_SurfaceDistance.h>
+ 
++#include <AP_IDS/AP_IDS.h>
+ // Configuration
+ #include "defines.h"
+ #include "config.h"
+@@ -342,6 +343,14 @@ private:
+ 
+     // GCS selection
+     GCS_Copter _gcs; // avoid using this; use gcs()
++#if AP_IDS_ENABLED
++    AP_IDS ids;
++    void update_ids();
++#if AP_IDS_GNSSINT_ENABLED
++    void capture_ids_imu_sample();
++    void update_ids_gnss_observation();
++#endif
++#endif
+     GCS_Copter &gcs() { return _gcs; }
+ 
+     // User variables
+diff --git a/ArduCopter/GCS_MAVLink_Copter.cpp b/ArduCopter/GCS_MAVLink_Copter.cpp
+index edf8b20..70d4b8f 100644
+--- a/ArduCopter/GCS_MAVLink_Copter.cpp
++++ b/ArduCopter/GCS_MAVLink_Copter.cpp
+@@ -378,6 +378,13 @@ void GCS_MAVLINK_Copter::packetReceived(const mavlink_status_t &status,
+         // optional handling of GLOBAL_POSITION_INT as a MAVLink based avoidance source
+         copter.avoidance_adsb.handle_msg(msg);
+     }
++#endif
++#if AP_IDS_ENABLED
++    // PUSHPAK IDS: observe only; the packet is handled normally below
++    AP_IDS *ids = AP_IDS::get_singleton();
++    if (ids != nullptr) {
++        ids->handle_mavlink(static_cast<uint8_t>(chan), msg);
++    }
+ #endif
+     GCS_MAVLINK::packetReceived(status, msg);
+ }
+diff --git a/ArduCopter/wscript b/ArduCopter/wscript
+index 63cf310..f9d4ec1 100644
+--- a/ArduCopter/wscript
++++ b/ArduCopter/wscript
+@@ -6,6 +6,7 @@ def build(bld):
+         name=vehicle + '_libs',
+         ap_vehicle=vehicle,
+         ap_libraries=bld.ap_common_vehicle_libraries() + [
++            'AP_IDS',
+             'AC_AttitudeControl',
+             'AC_InputManager',
+             'AC_PrecLand',
+diff --git a/Tools/ardupilotwaf/boards.py b/Tools/ardupilotwaf/boards.py
+index dbe4694..809d2e7 100644
+--- a/Tools/ardupilotwaf/boards.py
++++ b/Tools/ardupilotwaf/boards.py
+@@ -798,6 +798,15 @@ class SITLBoard(Board):
+ 
+     def configure_env(self, cfg, env):
+         super().configure_env(cfg, env)
++
++        # SPIDERS/PUSHPAK: ROMFS_custom/scripts holds the flight-controller IDS
++        # Lua scripts for the Pixhawk6C image. Keep them out of SITL images so
++        # autotests run on stock ROMFS (the nine scripts plus a test's own
++        # script exhaust the default 200 KB scripting heap). Run them on SITL
++        # from the scripts/ directory instead (BUILD_AND_LINKING.md, path A).
++        env.ROMFS_FILES = [f for f in env.ROMFS_FILES
++                           if not f[1].replace(os.sep, '/').startswith('ROMFS_custom/scripts/')]
++
+         env.DEFINES.update(
+             CONFIG_HAL_BOARD = 'HAL_BOARD_SITL',
+             CONFIG_HAL_BOARD_SUBTYPE = 'HAL_BOARD_SUBTYPE_NONE',
+diff --git a/libraries/AP_Scripting/generator/description/bindings.desc b/libraries/AP_Scripting/generator/description/bindings.desc
+index 4e0d0b0..168084f 100644
+--- a/libraries/AP_Scripting/generator/description/bindings.desc
++++ b/libraries/AP_Scripting/generator/description/bindings.desc
+@@ -1162,3 +1162,12 @@ userdata DroneCAN_Handle method subscribe boolean
+ userdata DroneCAN_Handle manual check_message DroneCAN_Handle::check_message 0 4
+ userdata DroneCAN_Handle manual_operator __gc DroneCAN_Handle::__gc
+ 
++
++-- PUSHPAK AP_IDS (from PUSHPAK_IDS_GCS_BRIDGE/patches/bindings.desc.add)
++
++include AP_IDS/AP_IDS.h
++singleton AP_IDS depends AP_IDS_ENABLED
++singleton AP_IDS rename ids
++singleton AP_IDS method event_sequence uint32_t
++singleton AP_IDS method report_confirmed boolean string uint8_t 1 4 float'skip_check uint16_t'skip_check float'skip_check uint8_t 0 255 uint32_t'skip_check
++singleton AP_IDS method get_channel boolean uint8_t 0 7 uint8_t'Null float'Null uint16_t'Null

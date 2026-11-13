@@ -625,6 +625,7 @@ class Runtime:
         lua_health = pk.lua_health if pk else {}
         return {"rows": rows, "lua_health": lua_health,
                 "event_delivery": pk.delivery.status() if pk is not None and hasattr(pk, "delivery") else None,
+                "gnss_integrity": pk.gnss_integrity_status() if pk is not None and hasattr(pk, "gnss_integrity_status") else None,
                 "jamming": "JAMMING is not a PIDS detector in the supplied source; jamming_confirm.lua classifies RC_LINK evidence (shown under RC_LINK).",
                 "fc_available": bool(pk and pk.fc), "lua_available": bool(pk and pk.lua),
                 "firmware_note": next((f"{d['summary']} ({d['id']})" for d in self.capabilities.get("discrepancies", [])), None)}

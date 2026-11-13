@@ -33,7 +33,7 @@ local last_sync = nil
 local gcs_present = false
 
 local function gcs_seen(now)
-    local last = common.to_number(gcs:sysid_mygcs_last_seen_time_ms())
+    local last = common.to_number(gcs:last_seen())
     return last > 0 and (now - last) < GCS_LOST_MS
 end
 
