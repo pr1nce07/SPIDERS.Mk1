@@ -25,8 +25,10 @@ This document lists the firmware changes needed to close the onboard gaps in *SP
 | FW-10 | Firmware root of trust, signed update, anti-rollback, recovery | GAP-04 | P0 | Release key and manifest ready |
 | FW-11 | Independent navigation evidence (second GNSS, streams) | GAP-09 | P1 | `GNSS2` lineage group ready |
 | FW-12 | Safety invariants, fault-injection build, CI checks | GAP-01/03, SAFE-01 | P0 | — |
+| FW-13 | IMU-propagated GNSS integrity engine (2/5/15/30/60 s horizons) + `IDSG`/`IDSR` records | GAP-09 | P1 | **Parses `IDSG`/`IDSR` today**; portable engine + host tests in `firmware/native/`; runs and logs in 4.7.1 SITL |
+| FW-14 | Build hygiene and SITL autotest findings (`AP_IDS_ENABLED 0`, idle `FC_EVENT` noise) | — | P2 | — |
 
-Recommended order (it follows the blueprint's sprints): FW-00 → FW-02 → FW-12 → FW-01 → FW-06 → FW-03 → FW-04 → FW-05 → FW-07 → FW-08 → FW-10 → FW-09 → FW-11.
+Recommended order (it follows the blueprint's sprints): FW-00 → FW-02 → FW-12 → FW-01 → FW-06 → FW-03 → FW-04 → FW-05 → FW-07 → FW-08 → FW-10 → FW-09 → FW-11 → FW-13. FW-13 depends on FW-00 (pinned tree), FW-01 (timing instrumentation) and FW-03 (logging).
 
 ---
 
@@ -216,12 +218,13 @@ What is still open:
 
 | Item | Work |
 |---|---|
-| DISC-005 — build_v3's ROMFS embeds older `command_confirm`, `ids_gcs_bridge`, `jamming_confirm`, `mavlink_confirm`, `offboard_confirm`, `modules/ids_common` (comment-only) | Rebuild with `firmware/ROMFS_custom_fixed.zip` (bridge protocol v2). Until then load the scripts from the SD card with `SCR_DIR_DISABLE=1` so the ROMFS copies don't also run. |
+| DISC-005 — build_v3's ROMFS embeds older `command_confirm`, `ids_gcs_bridge`, `jamming_confirm`, `mavlink_confirm`, `offboard_confirm`, `modules/ids_common` (comment-only) | Source side done (11 Nov 2026): the tree's `ROMFS_custom/scripts/` (in `GNSSIntegrity_snapshot`) is byte-identical to `firmware/scripts`. Build the board image from it (FW-00). Until then load the scripts from the SD card with `SCR_DIR_DISABLE=1` so the ROMFS copies don't also run. |
+| Binding names in mocks | `ALLOWED` in `test_lua_scripts.py` was taken from ELF symbols, which carry the **C++** method name. Where `bindings.desc` has a `rename`, Lua sees the new name (`GCS sysid_mygcs_last_seen_time_ms` → `last_seen`). Check every allowed method against `bindings.desc`, and run the scripts on SITL after any binding change. |
 | Binding differs between build_v3 (26 methods) and the 14 Oct build (3 methods, `get_channel`) | Pick one for the release (FW-00). The shipped scripts use only `report_confirmed` and `event_sequence`, so they work with either; keep it that way, or update the strict test mocks (`backend/tests/test_lua_scripts.py::ALLOWED`) if the scripts start using accessors. |
 | `report_confirmed` from Lua | Confirm that Lua confirmations end up in the AP_IDS event ring and, once FW-03 lands, in `IDSE` records with `Inst` marking Lua origin. |
 | Missing Lua inputs (README "Coverage limits"; also true on build_v3) | Add read-only bindings for: per-channel MAVLink packet/drop statistics; RC RSSI; a command-received event (from the FW-04 / FW-05 observers); offboard setpoint stats. Add each to the strict test mocks. |
 
-**Test environment note.** The Lua tests (`test_lua_scripts.py`, the bridge tests in `test_event_delivery.py`) need the `lupa` package (Lua 5.4). It is not in `backend/requirements.txt` and is not installed in the current venv, so those tests are **skipped**. Install it in CI before relying on them.
+**Test environment note.** The Lua tests (`test_lua_scripts.py`, the bridge tests in `test_event_delivery.py`) need the `lupa` package (Lua 5.4). It is installed in the project `.venv` and the tests run there (11 Nov 2026), but it is not in `backend/requirements.txt`; add it, or CI will silently skip them.
 
 ---
 
@@ -295,6 +298,60 @@ The GCS release manifest is signed with an Ed25519 "release" key (`release/manif
 
 ---
 
+## FW-13 — IMU-propagated GNSS integrity engine (GAP-09)
+
+**Problem.** Every onboard GPS check compares GNSS against AHRS/EKF navigation, which itself fuses the GNSS under test. A spoofer that drags the EKF along stays inside those residuals.
+
+**Done in this repository.**
+- Portable C++ engine `firmware/native/AP_IDS/GNSSIntegrity/`. It is GNSS-independent during each 2/5/15/30/60 s horizon, uses fixed memory with no heap, and ArduPilot-style strict warnings are clean. It cross-compiles for Cortex-M7: about 15 KB of code, about 18 KB of RAM (host `sizeof`).
+- 25 host unit tests in `firmware/native/tests/` (run by `backend/tests/test_native_gnss_integrity.py`), including the key invariant: once a horizon is armed, GNSS after its start cannot change its prediction.
+- Adapter `firmware/native/AP_IDS/AP_IDS_GNSSIntegrity.{h,cpp}` (opt-in defaults). The working ArduPilot tree with the engine built in is in `firmware/GNSSIntegrity_snapshot/`.
+- GCS: the `IDSG`/`IDSR` decoder, results, evidence lineage and the IDS page panel.
+
+**Done in the ArduPilot tree (dev branch `feature/gnss-integrity-physics`, 4.7.1 SITL, 11 Nov 2026).**
+- Steps 1 and 2 below: engine and adapter compiled into AP_IDS; `capture_ids_imu_sample` runs as a fast task right after `AP_InertialSensor::update`, and `update_ids_gnss_observation` runs at 50 Hz after `AP_GPS::update`. IMU accessors resolved to `get_first_usable_gyro/accel()`.
+- `IDSG` written at 1 Hz with five `IDSR` rows each; state 4 (VALID) on a stationary vehicle. `Boot` is always 0 until FW-06.
+- Engine on vs compiled out: identical autotest results and identical Lua/bridge behaviour.
+- The tree builds the engine in and enables it by default (`AP_IDS_GNSSINT_ENABLED 1`, `EN` 1). That is a dev setting: the merge gates (§7 of `firmware/native/README.md`) have not passed.
+
+**Still open in the tree.**
+- **Step 3 is not done.** The engine's result is logged but not fed into the GPS detector: nothing ORs in `INS_PREDICTION`/`PHYS_CONSTRAINT` or calls into the GPS detector's suspicion path.
+- **`IDS_GI_*` parameters are not exposed.** `AP_IDS_GNSSIntegrity::var_info` is not registered in Copter's parameter table, so the firmware has no `IDS_*` parameters (checked against the full SITL list) and runs on compiled-in defaults.
+
+**Firmware work (see `firmware/native/README.md` for the step-by-step patch):**
+1. Copy `GNSSIntegrity/` and the adapter into the pinned tree. Register the `.cpp` files in the AP_IDS build, then verify every `VERIFY` call against `dbe79216`.
+2. Add a fast capture hook immediately after `AP_InertialSensor::update` in the Copter fast-task table, and an observation task right after `update_GPS`. Do **not** drive capture from the 5 Hz `update_ids()`.
+3. Feed the result into the **existing** GPS detector: OR in evidence bits `4096 INS_PREDICTION` and `8192 PHYS_CONSTRAINT`, and let its persistence policy decide `SUSPECTED`. No ninth detector ID, and never automatic `CONFIRMED`.
+4. Bench-prove the delta-velocity gravity convention, the backend lag handling (`IDS_GI_LAT_MS` stays 0 unless proven) and the timing budget (FW-01).
+
+**Wire contract** (pinned by `GNSSIntegrityLog.h` and `test_firmware_contract.py`). The 16-field FMT limit forces the split into a summary and per-horizon rows. `IDSR` rows for a `Seq` are written before the `IDSG` row with the same `Seq`. Rate is 1 Hz plus every state transition.
+
+| Name | Format | Fields |
+|---|---|---|
+| `IDSG` | `QIIBBBBBBIHhffff` | `TimeUS, Boot, Seq, Ver, St, AM, VM, WM, XM, Fl, FAge, Lag, Conf, DvR, BrR, BiN` |
+| `IDSR` | `QIIBBBBfffffffff` | `TimeUS, Boot, Seq, H, Dur, St, Rsn, El, RP, RV, TP, TV, TD, SP, SV, YSd` |
+
+`St` (IDSG) values: 0 DISABLED, 1 INITIALIZING, 2 NO_TRUSTED_SEED, 3 HEADING_UNOBSERVABLE, 4 VALID, 5 DEGRADED, 6 WARNING, 7 ALARM. The flag, status and reason bits are listed in `GNSSIntegrityTypes.h`. The GCS maps WARNING to ANOMALOUS and ALARM to SUSPECTED, and reports DEGRADED as a health observation, never as an attack.
+
+**Done when:** the merge gates in `firmware/native/README.md` §7 pass on Pixhawk 6C. That covers bounded capture runtime, no missed or duplicate increments, live/replay agreement and an unchanged detector baseline with the feature disabled.
+
+---
+
+## FW-14 — Build hygiene and SITL autotest findings (11 Nov 2026)
+
+Found while running the upstream Copter autotests against the AP_IDS tree.
+
+| Item | Status / work |
+|---|---|
+| ROMFS scripts broke nine upstream scripting autotests (Lua heap exhausted → "Prearm bit never went true") | **Fixed** for SITL: `SITLBoard` in `Tools/ardupilotwaf/boards.py` skips `ROMFS_custom/scripts/`. Board builds still embed them and need a raised `SCR_HEAP_SIZE`. |
+| `tool/Replay` and other vehicles compiled the `ids` binding without linking AP_IDS | **Fixed**: `AP_IDS_ENABLED` defaults to `APM_BUILD_COPTER_OR_HELI` where the vehicle is known (`AP_IDS.h`). |
+| Replay autotest panics: `PANIC: Failed to log replay block`, then no `EKF_STATUS_REPORT` | **Environment.** Clean upstream `dbe79216` fails the same way in the WSL test machine. Re-check on another host before treating it as an AP_IDS problem. |
+| `AP_IDS_ENABLED 0` does not compile | Open. `IMUDetector.cpp:16` defines `constexpr uint8_t IMUDetector::MAX_IMUS;` before `#if AP_IDS_ENABLED`, while the class is only declared inside it. Move the definition inside the guard. This blocks a clean "feature off" baseline build. |
+| Idle bridge sends `FC_EVENT` about once a second | Open. `event_sequence` only advances when a detector's state, evidence or instance changes, and it rises about 2/s on a stationary SITL vehicle, with or without the GNSS engine. Find the flapping detector (likely an event-driven one reset every cycle in `AP_IDS_Adapters.cpp`) and add hysteresis, or rate-limit `FC_EVENT`. |
+| `ATTITUDE_FAST` rate about 350 Hz against a 400 Hz target | Environment timing on the WSL test machine; also fails with the engine off. |
+
+---
+
 ## What the GCS already does, for reference
 
 | Area | Where |
@@ -302,6 +359,7 @@ The GCS release manifest is signed with an Ed25519 "release" key (`release/manif
 | Evidence lineage / independence | `backend/app/ids/lineage.py`, `correlation.py`; tests `test_lineage.py` |
 | Bridge v2, delivery tracking, reboot and dup detection | `firmware/scripts/ids_gcs_bridge.lua`, `backend/app/mavlink/pushpak.py::EventDeliveryTracker`; `test_event_delivery.py` |
 | DataFlash IDSE/IDSH/IDSF/IDSW and PIDS v2 STATUSTEXT / SYNC boot= drop= | `pushpak_fc.py::_dataflash`, `sources/files.py`; `test_firmware_contract.py` |
+| GNSSIntegrity IDSG/IDSR records, INS_PREDICTION/PHYS_CONSTRAINT evidence bits and lineage (FW-13) | `pushpak.py::decode_idsg/decode_idsr`, `pushpak_fc.py::_gnss_integrity`, `lineage.py`; `test_firmware_contract.py`, `test_native_gnss_integrity.py` |
 | Signing keyring, per-link policy, four facts | `backend/app/security/keys.py`, `ids/mavlink.py`; Settings → Security |
 | Signed cases, custody, audit checkpoints | `backend/app/security/evidence.py`, `forensic/snapshot.py`; `test_trust_controls.py` |
 | Approved baseline | `backend/app/security/baseline.py`, `ids/baseline.py` |

@@ -1,7 +1,7 @@
 -- PUSHPAK UAV IDS: RC / telemetry link (jamming candidate) confirmation
 -- /APM/scripts/jamming_confirm.lua
 --
--- Uses rc:has_valid_input() and gcs:sysid_mygcs_last_seen_time_ms(). The build
+-- Uses rc:has_valid_input() and gcs:last_seen(). The build
 -- exposes no RSSI binding, so gradual RSSI trends are left to the GCS RC_LINK
 -- detector; this script classifies loss patterns instead:
 --   * RC input invalid                          -> DEGRADED
@@ -22,7 +22,7 @@ local function update()
     local now = common.now_ms()
     local valid = rc:has_valid_input()
     local flying = vehicle:get_likely_flying()
-    local gcs_last = common.to_number(gcs:sysid_mygcs_last_seen_time_ms())
+    local gcs_last = common.to_number(gcs:last_seen())
     local telem_lost = gcs_last ~= 0 and (now - gcs_last) > 3000
 
     if not valid then

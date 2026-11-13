@@ -29,7 +29,7 @@ local function update()
     local mode = vehicle:get_mode()
     local flying = vehicle:get_likely_flying()
     if mode ~= last_mode and mode == GUIDED then
-        local gcs_last = common.to_number(gcs:sysid_mygcs_last_seen_time_ms())
+        local gcs_last = common.to_number(gcs:last_seen())
         source_flag = vehicle:get_control_mode_reason() == REASON_GCS_COMMAND and (gcs_last == 0 or now - gcs_last > 3000)
     end
     last_mode = mode

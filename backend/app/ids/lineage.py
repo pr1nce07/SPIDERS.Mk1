@@ -59,6 +59,20 @@ METHOD_LINEAGE: dict[str, tuple[str, ...]] = {
     "IMU gyro ↔ AHRS body rates": ("IMU", "EKF"),
     "commanded-vs-observed kinematic divergence": ("SETPOINT_STREAM", "EKF"),
     "EKF status flags": ("EKF",),
+    # FW-13 native GNSSIntegrity engine (DataFlash IDSG): GNSS against an IMU-only prediction.
+    # A different analytical relation from GPS-vs-EKF, but it consumes the same GNSS receiver and
+    # the same IMU, so it merges with GPS_INTEGRITY and IMU_CONSISTENCY into one evidence line.
+    "IMU-propagated GNSS integrity (IDSG)": ("GNSS", "IMU"),
+    "IMU-propagated GNSS integrity + baro (IDSG)": ("GNSS", "IMU", "BARO"),
+    "GNSS stationary-ground constraint (IDSG)": ("GNSS", "IMU", "VEHICLE_STATE"),
+    "GNSS/baro altitude-change cross-check (IDSG)": ("GNSS", "BARO"),
+}
+
+# Evidence bits that add physical inputs to a PUSHPAK FC event of a family (method metadata
+# carried in the compact IDSE/PIDS summary). Only these events gain the extra groups; the
+# family default stays as it is for GPS events that did not use the physics engine.
+PUSHPAK_EVIDENCE_LINEAGE: dict[str, dict[str, tuple[str, ...]]] = {
+    "GPS": {"INS_PREDICTION": ("IMU",), "PHYS_CONSTRAINT": ("BARO",)},
 }
 
 # PUSHPAK FC (PIDS) and Lua results carry the onboard detector family in inputs["detector"].
@@ -101,7 +115,12 @@ def lineage_for(r) -> Optional[tuple[str, ...]]:
     if r.detector == "PUSHPAK_FC":
         fam = (r.inputs or {}).get("detector")
         if fam in PUSHPAK_LINEAGE:
-            return tuple(sorted(PUSHPAK_LINEAGE[fam]))
+            groups = set(PUSHPAK_LINEAGE[fam])
+            bits = ((r.inputs or {}).get("evidence") or {}).get("bits") or []
+            for bit, extra in PUSHPAK_EVIDENCE_LINEAGE.get(fam, {}).items():
+                if bit in bits:
+                    groups.update(extra)
+            return tuple(sorted(groups))
     if r.detector in DETECTOR_LINEAGE:
         return tuple(sorted(DETECTOR_LINEAGE[r.detector]))
     if r.domain in DOMAIN_LINEAGE:

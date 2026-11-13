@@ -70,9 +70,9 @@ export const STATE_ORDER = ["NORMAL", "CLEAR", "OBSERVED", "ANOMALOUS", "SUSPECT
 export function stateTone(s: string | null | undefined): string {
   switch ((s || "").toUpperCase()) {
     case "CONFIRMED": case "CRITICAL": case "ERROR": case "LOST": case "INVALID SIGNATURE": return "crit";
-    case "SUSPECTED": case "CORRELATED": case "HIGH": return "high";
-    case "ANOMALOUS": case "MEDIUM": case "DEGRADED": case "STALE": case "RECONNECTING": case "CONNECTING": return "warn";
-    case "OBSERVED": case "LOW": case "WAITING_FOR_DATA": case "INFO": return "info";
+    case "SUSPECTED": case "CORRELATED": case "HIGH": case "ALARM": return "high";
+    case "ANOMALOUS": case "WARNING": case "MEDIUM": case "DEGRADED": case "STALE": case "RECONNECTING": case "CONNECTING": return "warn";
+    case "OBSERVED": case "LOW": case "WAITING_FOR_DATA": case "INFO": case "HEADING_UNOBSERVABLE": case "NO_TRUSTED_SEED": case "INITIALIZING": return "info";
     case "NORMAL": case "CLEAR": case "ONLINE": case "CONNECTED": case "VALID": case "HEALTHY": case "AVAILABLE": case "RESOLVED": return "ok";
     case "DISABLED": case "DISCONNECTED": case "UNAVAILABLE": case "FALSE_POSITIVE": return "muted";
     default: return "muted";

@@ -14,10 +14,13 @@
 local common = require("ids_common")
 
 local tracker = common.new_tracker("PARAMETER", 1, 5000)
+-- Both pre-4.7 and 4.7+ names are listed (4.7 renamed RTL_ALT -> RTL_ALT_M, WPNAV_SPEED ->
+-- WP_SPD, ANGLE_MAX -> ATC_ANGLE_MAX, ARMING_CHECK -> ARMING_SKIPCHK, GPS_TYPE -> GPS1_TYPE,
+-- SYSID_MYGCS -> MAV_GCS_SYSID). param:get() returns nil for names a build lacks; those are skipped.
 local WATCH = {
-    "FENCE_ENABLE", "ARMING_CHECK", "FS_THR_ENABLE", "FS_GCS_ENABLE", "BATT_FS_LOW_ACT", "RTL_ALT",
-    "WPNAV_SPEED", "ANGLE_MAX", "GPS_TYPE", "EK3_SRC1_POSXY", "SCR_ENABLE", "MAV_GCS_SYSID", "SYSID_MYGCS",
-    "DISARM_DELAY", "LOG_BACKEND_TYPE",
+    "FENCE_ENABLE", "ARMING_CHECK", "ARMING_SKIPCHK", "FS_THR_ENABLE", "FS_GCS_ENABLE", "BATT_FS_LOW_ACT",
+    "RTL_ALT", "RTL_ALT_M", "WPNAV_SPEED", "WP_SPD", "ANGLE_MAX", "ATC_ANGLE_MAX", "GPS_TYPE", "GPS1_TYPE",
+    "EK3_SRC1_POSXY", "SCR_ENABLE", "MAV_GCS_SYSID", "SYSID_MYGCS", "DISARM_DELAY", "LOG_BACKEND_TYPE",
 }
 local original, current, drift = {}, {}, {}
 local changes = {}

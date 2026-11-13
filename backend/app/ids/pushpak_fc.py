@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ..mavlink.pushpak import (LUA_CONFIRM_THRESHOLD, LUA_SCRIPT_FOR_DETECTOR, PIDS_DETECTORS, EventDeliveryTracker,
-                               StatusTextAssembler, parse_statustext)
+from ..mavlink.pushpak import (GNSSINT_HORIZONS_S, LUA_CONFIRM_THRESHOLD, LUA_SCRIPT_FOR_DETECTOR, PIDS_DETECTORS,
+                               EventDeliveryTracker, StatusTextAssembler, decode_idsg, decode_idsr, parse_statustext)
 from ..models.events import TelemetryEvent
 from .base import AnalysisContext, Detector
 
@@ -22,9 +22,11 @@ class PushpakFCDetector(Detector):
     detector_id = "PUSHPAK_FC"
     name = "PUSHPAK FC / Lua"
     domain = "PUSHPAK"
-    # STATUSTEXT live; DataFlash IDSE/IDSH/IDSF records from imported logs once the firmware writes them (FW-03)
-    data_sources = ("STATUSTEXT", "DF_IDSE", "DF_IDSH", "DF_IDSF")
-    methods = ("PIDS STATUSTEXT adapter", "Lua confirmation adapter", "Lua runtime-error health")
+    # STATUSTEXT live; DataFlash IDSE/IDSH/IDSF records from imported logs once the firmware writes them (FW-03);
+    # IDSG/IDSR GNSSIntegrity physics-engine detail records (FW-13).
+    data_sources = ("STATUSTEXT", "DF_IDSE", "DF_IDSH", "DF_IDSF", "DF_IDSG", "DF_IDSR")
+    methods = ("PIDS STATUSTEXT adapter", "Lua confirmation adapter", "Lua runtime-error health",
+               "IMU-propagated GNSS integrity (IDSG)")
     description = "Normalises FC (PIDS) and Lua confirmation STATUSTEXT into detector states; tracks Lua script health."
     limitations = ("FC/Lua states are N/A until the vehicle sends PUSHPAK STATUSTEXT: the Lua scripts must be installed "
                    "(SCR_ENABLE=1) and the telemetry link must carry STATUSTEXT.",
@@ -40,12 +42,18 @@ class PushpakFCDetector(Detector):
         self.assembler = StatusTextAssembler()
         self.chunk_idx: dict = {}
         self.delivery = EventDeliveryTracker()
+        self.gnss_integrity: Optional[dict] = None   # latest IDSG summary with its IDSR horizons
+        self.gnss_integrity_history: list[dict] = []
+        self._idsr_pending: dict[tuple, dict] = {}
+        self._idsg_seen: set[tuple] = set()
 
     def process(self, ev: TelemetryEvent, ctx: AnalysisContext):
         if ev.sysid != ctx.vehicle_sysid:
             return []
         if ev.msg_name in ("DF_IDSE", "DF_IDSH", "DF_IDSF"):
             return self._dataflash(ev, ctx)
+        if ev.msg_name in ("DF_IDSG", "DF_IDSR"):
+            return self._gnss_integrity(ev, ctx)
         key = (ev.sysid, ev.compid, ev.fields.get("id") or 0)
         self.chunk_idx.setdefault(key, []).append(ev.idx)
         text, _chunks = self.assembler.push(ev.sysid, ev.compid, ev.fields, ctx.mono)
@@ -181,6 +189,108 @@ class PushpakFCDetector(Detector):
                             severity="MEDIUM", ev=ev, source="FC", domain="PUSHPAK", method="DataFlash IDSF fault record",
                             inputs=dict(f), why="The native IDS recorded an internal fault and its recovery state.")]
 
+    GNSSINT_LIMITATIONS = (
+        "GNSS/INS disagreement is evidence of GNSS integrity loss, not proof of intentional spoofing.",
+        "Shares the GNSS receiver with GPS_INTEGRITY and the IMU with IMU_CONSISTENCY: the correlator counts "
+        "them as one line of evidence, not as independent corroboration.",
+        "An attack already present when the engine was seeded cannot be detected by this method.",
+    )
+
+    def _gnss_integrity(self, ev, ctx) -> list:
+        """FW-13: native GNSSIntegrity engine (IMU-only prediction vs GNSS), DataFlash IDSG + IDSR."""
+        f = ev.fields
+        self.mark_data(ctx)
+        key = (int(f.get("Boot", 0)), int(f.get("Seq", 0)))
+        if ev.msg_name == "DF_IDSR":
+            row = decode_idsr(f)
+            self._idsr_pending.setdefault(key, {})[row["index"]] = row
+            for k in list(self._idsr_pending)[:-8]:   # bounded: rows only wait for their own summary
+                self._idsr_pending.pop(k, None)
+            if self.gnss_integrity and (self.gnss_integrity["boot"], self.gnss_integrity["seq"]) == key:
+                self.gnss_integrity["horizons"][row["index"]] = row   # late row for an already-seen summary
+            return []
+        if key in self._idsg_seen:
+            return []   # same evaluation replayed (duplicate log import)
+        self._idsg_seen.add(key)
+        if len(self._idsg_seen) > 20000:
+            self._idsg_seen = {k for k in self._idsg_seen if k[0] == key[0]}
+        rec = decode_idsg(f)
+        rec["t"] = ctx.t
+        rec["horizons"] = self._idsr_pending.pop(key, {})
+        prev = self.gnss_integrity
+        self.gnss_integrity = rec
+        self.gnss_integrity_history.append({k: rec[k] for k in ("t", "seq", "state", "confidence", "warn", "alarm", "valid")})
+        del self.gnss_integrity_history[:-600]
+        st, pst = rec["state"], (prev or {}).get("state")
+        if st == pst:
+            return []
+        inputs = {"detector": "GPS", "engine": "GNSSIntegrity", "gnss_integrity_state": st, "boot": rec["boot"],
+                  "seq": rec["seq"], "armed_horizons_s": rec["armed"], "valid_horizons_s": rec["valid"],
+                  "warn_horizons_s": rec["warn"], "alarm_horizons_s": rec["alarm"], "flags": rec["flags"],
+                  "delta_speed_residual_mps": rec["delta_speed_residual_mps"], "baro_residual_m": rec["baro_residual_m"],
+                  "accel_bias_norm_mps2": rec["accel_bias_norm_mps2"], "fix_age_ms": rec["fix_age_ms"],
+                  "applied_lag_ms": rec["applied_lag_ms"], "idsg": dict(f)}
+        horizon_lines = [f"{h['duration_s']} s horizon: {','.join(h['status']) or 'idle'}; |r_p| {h['position_residual_m']:.1f} m "
+                         f"(D2 {h['position_test']:.1f}), |r_v| {h['velocity_residual_mps']:.2f} m/s (D2 {h['velocity_test']:.1f}), "
+                         f"speed-change D2 {h['delta_speed_test']:.1f}; reason {h['reason']}"
+                         for _, h in sorted(rec["horizons"].items())]
+        limits = list(self.GNSSINT_LIMITATIONS)
+        if not rec["version_supported"]:
+            limits.append(f"IDSG record version {rec['version']} is not the version this GCS decodes")
+        if st in ("WARNING", "ALARM"):
+            ins = bool(rec["warn"] or rec["alarm"] or st == "ALARM")
+            baro = "BARO_WARN" in rec["flags"]
+            ground = "GROUND_WARN" in rec["flags"]
+            if ins:
+                method = "IMU-propagated GNSS integrity + baro (IDSG)" if baro else "IMU-propagated GNSS integrity (IDSG)"
+            elif ground:
+                method = "GNSS stationary-ground constraint (IDSG)"
+            else:
+                method = "GNSS/baro altitude-change cross-check (IDSG)"
+            which = ", ".join(f"{d} s" for d in (rec["alarm"] or rec["warn"]))
+            if not which:
+                which = "barometer" if baro else ("ground" if ground else "latched")
+            state = "SUSPECTED" if st == "ALARM" else "ANOMALOUS"
+            why = (f"The onboard GNSSIntegrity engine reported {st}: a GNSS fix failed the uncertainty-aware residual test "
+                   f"against an inertial prediction that GNSS cannot correct during the horizon. Joint confidence "
+                   f"{rec['confidence']:.2f} (FC-reported).")
+            return [self.result(ctx, state, f"FC GNSS integrity {st}: GNSS disagrees with the IMU-only prediction ({which})",
+                                ev=ev, source="FC", domain="GPS_INTEGRITY", confidence=rec["confidence"], inputs=inputs,
+                                method=method, why=why,
+                                evidence=[f"IDSG Boot {rec['boot']} Seq {rec['seq']}: state {st}, flags {','.join(rec['flags'])}"]
+                                + horizon_lines,
+                                contributors=[{"label": "FC GNSSIntegrity (IDSG)", "value": rec["confidence"]}],
+                                limitations=limits)]
+        if pst in ("WARNING", "ALARM"):
+            return [self.result(ctx, "OBSERVED", f"FC GNSS integrity returned to {st}", kind="recovery", ev=ev, source="FC",
+                                domain="GPS_INTEGRITY", confidence=rec["confidence"], inputs=inputs,
+                                method="IMU-propagated GNSS integrity (IDSG)", evidence=horizon_lines,
+                                why="The engine's sensitivity-aware clearing rule passed, or an independent reseed occurred.",
+                                limitations=limits)]
+        if st in ("DEGRADED", "HEADING_UNOBSERVABLE", "NO_TRUSTED_SEED"):
+            reasons = sorted({h["reason"] for h in rec["horizons"].values() if h["reason"] not in ("NONE", "EXPIRED")})
+            detail = f" ({', '.join(reasons)})" if reasons else ""
+            return [self.result(ctx, "OBSERVED", f"FC GNSS integrity {st} (reduced coverage, not spoofing evidence)",
+                                kind="health", severity="LOW", ev=ev, source="FC", domain="GPS_INTEGRITY", inputs=inputs,
+                                method="IMU-propagated GNSS integrity (IDSG)", evidence=horizon_lines,
+                                why=f"The inertial prediction cannot currently support a reliable comparison{detail}. "
+                                    "Degraded is never reported as an attack.",
+                                limitations=limits)]
+        return []
+
+    def gnss_integrity_status(self) -> Optional[dict]:
+        g = self.gnss_integrity
+        if g is None:
+            return None
+        horizons = [g["horizons"].get(i) or {"index": i, "duration_s": d, "status": [], "reason": "NO_RECORD"}
+                    for i, d in enumerate(GNSSINT_HORIZONS_S)]
+        out = {k: g[k] for k in ("t", "boot", "seq", "version", "state", "confidence", "armed", "valid", "warn", "alarm",
+                                 "flags", "fix_age_ms", "applied_lag_ms", "delta_speed_residual_mps", "baro_residual_m",
+                                 "accel_bias_norm_mps2")}
+        out["horizons"] = horizons
+        out["history"] = self.gnss_integrity_history[-120:]
+        return out
+
     def _delivery(self, rec: dict, ctx, ev, refs) -> list:
         """Bridge protocol v2 bookkeeping: reboots, missed/duplicate events (GAP-07)."""
         d, kind = self.delivery, rec["kind"]
@@ -230,10 +340,11 @@ class PushpakFCDetector(Detector):
     def tick(self, ctx):
         self.metrics = {"fc_detectors_reporting": sorted(self.fc), "lua_detectors_reporting": sorted(self.lua),
                         "lua_scripts": self.lua_health, "records": len(self.records), "unparsed_lua": self.unparsed,
-                        "event_delivery": self.delivery.status()}
+                        "event_delivery": self.delivery.status(),
+                        "gnss_integrity_state": (self.gnss_integrity or {}).get("state")}
         return []
 
     def table(self) -> dict:
         return {"fc": self.fc, "lua": self.lua, "lua_health": self.lua_health, "known_detectors": PIDS_DETECTORS,
-                "event_delivery": self.delivery.status(),
+                "event_delivery": self.delivery.status(), "gnss_integrity": self.gnss_integrity_status(),
                 "recent": self.records[-100:]}

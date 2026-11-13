@@ -162,9 +162,13 @@ git submodule update --init --recursive
 ```
 
 1. **Place the AP_IDS library and scripts** in the tree:
-   * `libraries/AP_IDS/` — the native detector sources (the same ones compiled in `build.zip`).
-   * `libraries/AP_IDS/ROMFS/scripts/` (or the board's ROMFS scripts dir) — copy this
-     folder's `scripts/` **including `modules/`**, replacing the old scripts.
+   * `libraries/AP_IDS/` — the native detector sources. The current tree (engine included) is
+     in `GNSSIntegrity_snapshot/ardupilot_untracked_AP_IDS_and_ROMFS.tar.gz`; apply
+     `GNSSIntegrity_snapshot/ardupilot_tracked_changes.patch` on `dbe79216` for the Copter,
+     binding and waf changes.
+   * `ROMFS_custom/scripts/` **at the tree root** — copy this folder's `scripts/` **including
+     `modules/`** (or unzip `ROMFS_custom_fixed.zip` at the root). `Tools/ardupilotwaf/boards.py`
+     embeds every file under `ROMFS_custom/`; no other location is picked up.
 2. **Link the Lua binding** (from the project's integration artifacts, per `VALIDATION.md`):
    ```
    git apply ArduCopter_IDS_integration.patch      # registers AP_IDS + hooks AP_IDS::update()
@@ -177,8 +181,14 @@ git submodule update --init --recursive
    ./waf configure --board sitl && ./waf copter        # test in SITL
    ./waf configure --board Pixhawk6C && ./waf copter    # → build/Pixhawk6C/bin/arducopter.apj
    ```
-   With scripts in ROMFS, `ap_romfs_embedded.h` is regenerated with the **new** scripts,
-   so you don't need `SCR_DIR_DISABLE`. Still set `SCR_ENABLE=1`.
+   On the **board** build, `ap_romfs_embedded.h` is regenerated with the **new** scripts,
+   so you don't need `SCR_DIR_DISABLE`. Still set `SCR_ENABLE=1`, and raise `SCR_HEAP_SIZE`
+   (the nine scripts plus any other script exhaust the default 200 KB heap).
+
+   **SITL builds do not embed `ROMFS_custom/scripts/`.** The local patch to `SITLBoard` in
+   `Tools/ardupilotwaf/boards.py` drops them, because with the scripts in ROMFS every upstream
+   scripting autotest ran out of heap (`not enough mem, increase SCR_HEAP_SIZE`) and failed
+   with "Prearm bit never went true". Test the scripts on SITL through `scripts/` (§6).
 4. **Flash** `build/Pixhawk6C/bin/arducopter.apj` and reboot.
 
 Recommended production sequence (from `VALIDATION.md`): apply patch → append binding desc →
@@ -190,11 +200,23 @@ HIL/bench test before flight.
 
 ## 6. Verify the link (SITL, no hardware)
 
+SITL loads scripts from `scripts/` in its working directory (path A; ROMFS scripts are not
+embedded in SITL builds, see §5):
+
 ```bash
-# build & run SITL with scripting + the scripts (path B), or point SITL at SD-style scripts:
+mkdir -p scripts && cp -r <SPIDERS>/firmware/scripts/. scripts/     # in the SITL working dir
 Tools/autotest/sim_vehicle.py -v ArduCopter --out=udp:127.0.0.1:14550
+# in MAVProxy:  param set SCR_ENABLE 1 ; param set SCR_HEAP_SIZE 400000 ; reboot
 # then connect the GCS:  SPIDERS.Mk1 → Connection → udp:127.0.0.1:14550
 ```
+
+Checked on 4.7.1 SITL (11 Nov 2026, engine compiled in): no `Lua:` errors; the bridge sends
+`BRIDGE binding=report_confirmed,event_sequence v=2`, `STATEMAP` and `SYNC`; three
+`ATC_ANGLE_MAX` changes while armed go SUSPECTED → CONFIRMED and native AP_IDS prints
+`[PIDS] PAR THREAT LV1` then `LV2`; the GNSS engine writes `IDSG` (1 Hz, state 4 VALID when
+stationary) and five `IDSR` rows per `IDSG`. Known noise: the bridge sends `FC_EVENT` about
+once a second on an idle vehicle, because a native detector (not the GNSS engine) toggles its
+state or evidence about twice a second.
 
 Offline, run the script test harness (Lua 5.4 with firmware-accurate binding mocks):
 
@@ -216,7 +238,7 @@ runs only when the original `ROMFS_custom.zip` is present. The tests need the `l
 | DISC-002 | `AP_IDSGCS::report_confirmed` is a stub | **Resolved.** 26 Sep build only; implemented in build_v3 and the 14 Oct build |
 | DISC-003 | only GPS/IMU/Mission detectors are driven | **Resolved.** 26 Sep build only; build_v3 drives all 8 (checked from call sites in the ELF) |
 | DISC-004 | PIDS state int→name mapping unverified | **Resolved.** `AP_IDS.h` `static_assert`s CLEAR=0, SUSPECTED=1, CONFIRMED=2 |
-| DISC-005 | build_v3 ROMFS embeds older copies of `command_confirm`, `ids_gcs_bridge`, `jamming_confirm`, `mavlink_confirm`, `offboard_confirm`, `modules/ids_common` (comment-only) | **Open.** Use path A with `SCR_DIR_DISABLE=1`, or rebuild with `ROMFS_custom_fixed.zip` (path B) |
+| DISC-005 | build_v3 ROMFS embeds older copies of `command_confirm`, `ids_gcs_bridge`, `jamming_confirm`, `mavlink_confirm`, `offboard_confirm`, `modules/ids_common` (comment-only) | **Open for the build_v3 image.** Fixed in the source tree: `ROMFS_custom/scripts/` in `GNSSIntegrity_snapshot` is byte-identical to `scripts/`. Closes when a new board image is built from it (FW-00). Until then use path A with `SCR_DIR_DISABLE=1` |
 
 ---
 
@@ -228,6 +250,8 @@ runs only when the original `ROMFS_custom.zip` is present. The tests need the `l
 | `scripts/ids_gcs_bridge.lua` | bridge protocol v2: announces binding/state map, SYNC, reports native `event_sequence()` changes |
 | `scripts/modules/ids_common.lua` | shared helpers + hysteresis state machine |
 | `ROMFS_custom_fixed.zip` | zipped copy of `scripts/` for ROMFS drop-in |
+| `GNSSIntegrity_snapshot/` | the ArduPilot working tree: base commit, tracked-file patch, `libraries/AP_IDS` + `ROMFS_custom` tarball, last SITL build log. Base + patch + tarball reproduces the tree exactly |
+| `native/` | portable GNSS integrity engine, its host tests, and the reference adapter (opt-in defaults) |
 | `README.md` | what each script detects and why (the fix detail) |
 | `../configs/capabilities.json` | machine-checked firmware facts + discrepancies |
 | `shareable_progress/build.zip` | the 26 Sep 2026 compiled firmware artifact (flashable, not buildable) |

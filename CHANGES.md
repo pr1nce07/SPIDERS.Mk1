@@ -1,3 +1,40 @@
+# SPIDERS.Mk1 — SITL autotest fixes, script binding fixes (2026-11-11)
+
+Found by running the ArduPilot autotests and the scripts on 4.7.1 SITL instead of only the Lua mocks.
+
+| Area | Change | Tests |
+|---|---|---|
+| Lua scripts | `gcs:sysid_mygcs_last_seen_time_ms()` → `gcs:last_seen()` in five scripts (the C++ name; Lua sees the `bindings.desc` rename). Every script that used it stopped on the firmware. | `test_lua_scripts.py` mock corrected; 4.7.1 SITL: no `Lua:` errors |
+| Lua scripts | `parameter_confirm.lua` watches both pre-4.7 and 4.7 parameter names again; six of fifteen were missing on 4.7.1 | new `test_parameter_change_while_armed_47_names`; SITL: `[PIDS] PAR THREAT LV2` |
+| ROMFS package | `ROMFS_custom_fixed.zip` rebuilt from `firmware/scripts`; the ArduPilot tree's `ROMFS_custom/` (still the 14 Oct copies) replaced with it | `romfs_drift`: MATCH |
+| ArduPilot tree | `Tools/ardupilotwaf/boards.py`: SITL builds skip `ROMFS_custom/scripts/`. With them embedded, nine upstream scripting autotests ran out of Lua heap and failed "Prearm bit never went true" | FlyEachFrame, LUAConfigProfile, LuaParamLockdown, ScriptCopterPosOffsets, ScriptMountAllModes, ScriptMountDriver, ScriptMountPOI, ScriptingFlipMode, ScriptingFlyVelocity pass; FlyEachFrame also passes with the engine compiled out |
+| ArduPilot tree | `libraries/AP_IDS/AP_IDS.h`: `AP_IDS_ENABLED` defaults to `APM_BUILD_COPTER_OR_HELI` where the vehicle is known. `tool/Replay` and other vehicles compiled the `ids` binding but never link AP_IDS | `./waf build --target tool/Replay` links |
+| Native adapter | `firmware/native/AP_IDS/AP_IDS_GNSSIntegrity.cpp` uses `get_first_usable_gyro/accel()` (4.7.1 has no `get_primary_*`); README updated | engine host tests: 153 checks, 0 failures |
+| Snapshot | `firmware/GNSSIntegrity_snapshot/` regenerated; base + patch + tarball reproduces the tree exactly | — |
+| Release | `release/` manifest regenerated and re-signed (same key) | `make_release_manifest.py --verify`: VALID |
+
+Still open (see `firmware/FIRMWARE_WORK_REQUIRED.md`): no Pixhawk image built from the fixed tree (DISC-005 open for build_v3); `IDS_GI_*` parameters not registered; GNSS engine evidence not yet fed to the GPS detector; idle `FC_EVENT` noise from a native detector; `AP_IDS_ENABLED 0` does not compile; the Replay autotest panics in this WSL environment, also on clean upstream.
+
+---
+
+# SPIDERS.Mk1 — GNSS integrity physics engine (2026-11-10, FW-13)
+
+Implements *SPIDERS_Mk1_GNSS_Physics_Engine_Research_Integration.md*: an IMU-propagated, GNSS-independent integrity monitor for the native AP_IDS GPS path. See `firmware/native/README.md`.
+
+| Area | Change | Tests |
+|---|---|---|
+| Native engine | `firmware/native/AP_IDS/GNSSIntegrity/`: portable C++11, fixed memory, no heap. It has five horizons (2/5/15/30/60 s), each with its own seed, frozen bias and covariance, and a shared GNSS-free integrator with fix-time history. It provides a gated non-GNSS heading, a rate-limited bias estimator with change-point detection, and position/velocity/heading-free/baro/ground tests. The joint persistence decision includes a trust gate, confirmed re-arm, a latched ALARM, sensitivity-aware WARNING clearing and horizon extension during suspicion. It cross-compiles for Cortex-M7 under `-Werror -Wdouble-promotion -fsingle-precision-constant`. | `firmware/native/tests` (25 tests, 149 checks) via `test_native_gnss_integrity.py` |
+| Adapter | `firmware/native/AP_IDS/AP_IDS_GNSSIntegrity.{h,cpp}`: ArduPilot capture, seed policy, `IDS_GI_*` parameters, `IDSG`/`IDSR` logging. Was a template; since 2026-11-11 it builds and logs in 4.7.1 SITL (see the entry above). | — |
+| Wire contract | New DataFlash `IDSG` (summary) and `IDSR` (per horizon), plus PIDS evidence bits 4096 `INS_PREDICTION` and 8192 `PHYS_CONSTRAINT` | `test_firmware_contract.py` (header ⇄ parser, no Lua bit collision) |
+| GCS | `PushpakFCDetector` decodes IDSG/IDSR. WARNING maps to ANOMALOUS and ALARM to SUSPECTED, never CONFIRMED; DEGRADED is a health observation. It dedupes by `(Boot, Seq)`. | `test_firmware_contract.py` |
+| Lineage | Physics method lineage is `(GNSS, IMU)` (+`BARO`); FC GPS events carrying `INS_PREDICTION` gain `IMU`. The result merges with GPS_INTEGRITY and IMU_CONSISTENCY into one evidence line and is not counted as independent corroboration. | `test_firmware_contract.py` |
+| UI | IDS page → FC GNSS INTEGRITY panel: state, flags and per-horizon residuals, D² values, sigmas and reasons | `npm run typecheck` |
+| Discovery | `discover_firmware.py` reports `ap_ids.gnss_integrity_objects` | — |
+
+Firmware work is FW-13 in `firmware/FIRMWARE_WORK_REQUIRED.md`. Nothing has run on Pixhawk hardware yet.
+
+---
+
 # SPIDERS.Mk1 — gap-analysis GCS change set (2026-11-09)
 
 Closes the GCS side of *SPIDERS_Mk1_Gap_Analysis_and_Implementation_Blueprint.md*. Firmware work is listed in `firmware/FIRMWARE_WORK_REQUIRED.md`.

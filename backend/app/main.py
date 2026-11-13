@@ -954,7 +954,9 @@ def silktrace_behavior(evidence_id: str, _=INVESTIGATE):
 async def logs_import(request: Request, file: UploadFile = File(...), p: Principal = INVESTIGATE):
     r = rt(request)
     limit = int(r.config.get("limits.max_upload_mb", 1024)) * (1 << 20)
-    tmp = Path(tempfile.mkstemp(dir=r.dirs["work"], suffix=".upload")[1])
+    fd, tmp_name = tempfile.mkstemp(dir=r.dirs["work"], suffix=".upload")
+    os.close(fd)   # an open mkstemp handle makes the later move fail on Windows (WinError 32)
+    tmp = Path(tmp_name)
     size = 0
     with open(tmp, "wb") as fh:
         while chunk := await file.read(1 << 20):

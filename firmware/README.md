@@ -26,6 +26,8 @@ The *original* scripts called `ids:<det>_confidence/_evidence/_state()` and `ahr
 * **Unchanged:** the evidence-bit meanings and the `PUSHPAK IDS: <CLASS> conf=… evidence=0x…` / `GPS CONFIRMED …` report formats.
 * **`ids_gcs_bridge.lua` works differently now (protocol v2).** It does not mirror native detector states, because not every build has the accessors. Instead it reports changes in `ids:event_sequence()` as `PUSHPAK IDS: FC_EVENT seq=… delta=…`. It announces `BRIDGE … v=2` and `STATEMAP` at start, whenever the GCS (re)connects and every 60 s, and sends `SYNC up=… seq=… ev=…` every 10 s so the GCS can see reboots and missed events.
 * **Fixed an existing bug in the GPS script.** `gps:get_hdop()` returns centi-HDOP, so the threshold is now compared correctly.
+* **GCS link freshness uses `gcs:last_seen()`** (11 Nov 2026). `command_confirm`, `ids_gcs_bridge`, `jamming_confirm`, `mavlink_confirm` and `offboard_confirm` called `gcs:sysid_mygcs_last_seen_time_ms()`. That is the C++ method name, which is what the ELF symbol shows; `bindings.desc` renames it to `last_seen` for Lua, so on the firmware every one of those scripts stopped with `attempt to call a nil value`. The strict test mock had the same wrong name and has been corrected.
+* **`parameter_confirm.lua` watches the 4.7 names again** (11 Nov 2026). 4.7 renamed `ANGLE_MAX` → `ATC_ANGLE_MAX`, `ARMING_CHECK` → `ARMING_SKIPCHK`, `GPS_TYPE` → `GPS1_TYPE`, `RTL_ALT` → `RTL_ALT_M`, `WPNAV_SPEED` → `WP_SPD` and `SYSID_MYGCS` → `MAV_GCS_SYSID`. The watch list had lost the new names, so on 4.7.1 six of its fifteen entries returned nil and were never checked. Both names are now listed; `param:get()` returns nil for a name a build lacks, and it is skipped.
 
 ## Coverage limits
 These limits come from the standard ArduPilot bindings, which are the same on all three builds (checked in the build_v3 ELF):
@@ -41,7 +43,9 @@ These limits come from the standard ArduPilot bindings, which are the same on al
 Run `backend/tests/test_lua_scripts.py` (needs the `lupa` package). It runs every script under Lua 5.4 against strict mocks of the firmware's sandbox. The mocks allow only the methods the scripts may rely on: the two `ids` methods and the standard bindings listed above. They also remove `dofile`, restrict `require` to `modules/`, and reject non-integer values for `uint8_t`/`uint16_t` arguments.
 * It shows that the original scripts fail on the 26 Sep binding. This test is skipped unless the original `ROMFS_custom.zip` is present.
 * It checks that each fixed script stays quiet on benign data.
-* It checks that each fixed script confirms its attack scenario, with output parsed by the GCS parser.
+* It checks that each fixed script confirms its attack scenario, with output parsed by the GCS parser, including a parameter-tampering case that uses only 4.7.1 parameter names.
+
+The mocks only catch what they list. Both 11 Nov bugs passed them because the mock used the same wrong names, so also run the scripts on real firmware. On 4.7.1 SITL (scripts in `scripts/`, `SCR_HEAP_SIZE=400000`) all scripts run with no `Lua:` errors, and a confirmed detection reaches native AP_IDS (`[PIDS] PAR THREAT LV2 … LUA`). See `BUILD_AND_LINKING.md` §6.
 
 ## Loading the shared helper (hardware fix)
 The firmware's Lua sandbox has no `dofile`; only `require` is available. The original scripts all start with `dofile('/APM/scripts/ids_common.lua')`, so they would stop at line 1.
@@ -61,6 +65,8 @@ Copy the `scripts/` folder, including `scripts/modules/`, to one of these:
 * `APM/scripts/` on the SD card
 * the ROMFS scripts directory (`@ROMFS/scripts/` and `@ROMFS/scripts/modules/`), then rebuild
 
-Set `SCR_ENABLE=1` and reboot.
+Set `SCR_ENABLE=1` and reboot. Raise `SCR_HEAP_SIZE` too: each script compiles its own copy of `ids_common`, and the nine scripts plus one more script exceed the 200 KB default (`not enough mem, increase SCR_HEAP_SIZE`). 400000 was enough on SITL.
+
+SITL builds no longer embed `ROMFS_custom/scripts/` (local `boards.py` patch, `BUILD_AND_LINKING.md` §5), so on SITL use the `scripts/` folder in its working directory.
 
 **Note (DISC-005):** build_v3 embeds older ROMFS copies of `command_confirm.lua`, `ids_gcs_bridge.lua`, `jamming_confirm.lua`, `mavlink_confirm.lua`, `offboard_confirm.lua` and `modules/ids_common.lua` (the last differs only in a comment). An SD-card copy does not replace a ROMFS script; the firmware runs both. Either put the current scripts on the SD card **and set `SCR_DIR_DISABLE=1`** so ROMFS scripts are skipped (`BUILD_AND_LINKING.md` §4), or rebuild the firmware with `ROMFS_custom_fixed.zip`.

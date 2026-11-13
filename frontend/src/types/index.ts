@@ -37,7 +37,18 @@ export interface ComparisonRow {
   ground: { state: string; detector: string | null; all: Record<string, string | null> };
   correlated: string | null;
 }
-export interface Comparison { rows: ComparisonRow[]; lua_health: Record<string, any>; event_delivery?: Record<string, any> | null; jamming: string; fc_available: boolean; lua_available: boolean; firmware_note: string | null }
+export interface GnssIntegrityHorizon {
+  index: number; duration_s: number; status: string[]; reason: string; armed?: boolean; valid?: boolean; expired?: boolean;
+  warn?: boolean; alarm?: boolean; extended?: boolean; heading_free_only?: boolean; elapsed_s?: number;
+  position_residual_m?: number; velocity_residual_mps?: number; position_test?: number; velocity_test?: number;
+  delta_speed_test?: number; position_sigma_m?: number; velocity_sigma_mps?: number; yaw_sigma_rad?: number;
+}
+export interface GnssIntegrity {
+  t: number; boot: number; seq: number; version: number; state: string; confidence: number; armed: number[]; valid: number[];
+  warn: number[]; alarm: number[]; flags: string[]; fix_age_ms: number; applied_lag_ms: number; delta_speed_residual_mps: number;
+  baro_residual_m: number; accel_bias_norm_mps2: number; horizons: GnssIntegrityHorizon[];
+}
+export interface Comparison { rows: ComparisonRow[]; lua_health: Record<string, any>; event_delivery?: Record<string, any> | null; gnss_integrity?: GnssIntegrity | null; jamming: string; fc_available: boolean; lua_available: boolean; firmware_note: string | null }
 export interface IdsSnapshot { detectors: DetectorHealth[]; comparison: Comparison; rules?: { rule_id: string; version: number; evaluations: number; triggers: number; errors: number }[] }
 
 export interface Alert {
